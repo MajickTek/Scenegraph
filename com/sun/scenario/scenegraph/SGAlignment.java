@@ -1,154 +1,182 @@
-/*
- * Copyright 2007 Sun Microsystems, Inc.  All Rights Reserved.
- * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
- *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
- *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
- *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
- */
-
 package com.sun.scenario.scenegraph;
 
+import java.awt.ComponentOrientation;
+import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
-import javax.swing.SwingConstants;
+import java.util.Locale;
 
-/**
- * @author Chris Campbell
- */
 public class SGAlignment extends SGTransform {
-    
-    private int halign = SwingConstants.LEADING;
-    private int valign = SwingConstants.TOP;
-    private double tx;
-    private double ty;
-    private boolean transformValid;
-    
-    public SGAlignment() {
-    }
+   private static final boolean ltr;
+   private int halign = 10;
+   private int valign = 1;
+   // $FF: renamed from: tx double
+   private double field_18;
+   // $FF: renamed from: ty double
+   private double field_19;
+   private boolean transformValid;
 
-    public int getHorizontalAlignment() {
-        return halign;
-    }
-    
-    public void setHorizontalAlignment(int halign) {
-        if (halign != SwingConstants.LEADING &&
-            halign != SwingConstants.CENTER &&
-            halign != SwingConstants.TRAILING)
-        {
-            throw new IllegalArgumentException("invalid halign value");            
-        }
-        this.halign = halign;
-        invalidateTransform();
-    }
-    
-    public int getVerticalAlignment() {
-        return valign;
-    }
-    
-    public void setVerticalAlignment(int valign) {
-        if (valign != SwingConstants.TOP &&
-            valign != SwingConstants.CENTER &&
-            valign != SwingConstants.BOTTOM)
-        {
+   public int getHorizontalAlignment() {
+      return this.halign;
+   }
+
+   public void setHorizontalAlignment(int halign) {
+      if (this.halign != halign) {
+         if (halign != 2 && halign != 10 && halign != 0 && halign != 4 && halign != 11) {
+            throw new IllegalArgumentException("invalid halign value");
+         }
+
+         this.halign = halign;
+         this.invalidateTransform();
+      }
+
+   }
+
+   public int getVerticalAlignment() {
+      return this.valign;
+   }
+
+   public void setVerticalAlignment(int valign) {
+      if (this.valign != valign) {
+         if (valign != 1 && valign != 0 && valign != 3) {
             throw new IllegalArgumentException("invalid valign value");
-        }
-        this.valign = valign;
-        invalidateTransform();
-    }
-    
-    private void updateTransform() {
-        if (halign == SwingConstants.LEADING && valign == SwingConstants.TOP) {
-            tx = ty = 0.0;
-            return;
-        }
-        
-        Rectangle2D bounds = getBounds();
-        if (halign == SwingConstants.TRAILING) {
-            tx = -bounds.getWidth();
-        } else if (halign == SwingConstants.CENTER) {
-            tx = -bounds.getWidth()/2;
-        } else {
-            tx = 0.0;
-        }
-        if (valign == SwingConstants.BOTTOM) {
-            ty = -bounds.getHeight();
-        } else if (valign == SwingConstants.CENTER) {
-            ty = -bounds.getHeight()/2;
-        } else {
-            ty = 0.0;
-        }
-    }
-    
-    private void validateTransform() {
-        if (!transformValid) {
-            transformValid = true;
-            updateTransform();
-        }
-    }
-    
-    @Override
-    protected void invalidateTransform() {
-        super.invalidateTransform();
-        transformValid = false;
-    }
-    
-    @Override
-    void invalidateLocalBounds() {
-        super.invalidateLocalBounds();
-        transformValid = false;
-    }
-    
-    private static Point2D setPoint(Point2D dst, double x, double y) {
-        if (dst == null) {
-            dst = new Point2D.Float();
-        }
-        dst.setLocation(x, y);
-        return dst;
-    }
-    
-    @Override
-    public Point2D transform(Point2D src, Point2D dst) {
-        validateTransform();
-        return setPoint(dst, src.getX() + tx, src.getY() + ty);
-    }
+         }
 
-    @Override
-    public Point2D inverseTransform(Point2D src, Point2D dst) {
-        validateTransform();
-        return setPoint(dst, src.getX() - tx, src.getY() - ty);
-    }
+         this.valign = valign;
+         this.invalidateTransform();
+      }
 
-    @Override
-    public void concatenateInto(AffineTransform at) {
-        validateTransform();
-        at.translate(tx, ty);
-    }
+   }
 
-    @Override
-    public void getTransform(AffineTransform at) {
-        validateTransform();
-        at.setToTranslation(tx, ty);
-    }
-    
-    @Override
-    public void reset() {
-        setHorizontalAlignment(SwingConstants.LEADING);
-        setVerticalAlignment(SwingConstants.TOP);
-    }
+   private boolean isLeftAligned() {
+      return this.halign == 2 || this.halign == 10 && ltr || this.halign == 11 && !ltr;
+   }
+
+   private boolean isRightAligned() {
+      return this.halign == 4 || this.halign == 11 && ltr || this.halign == 10 && !ltr;
+   }
+
+   private void updateTransform() {
+      if (this.isLeftAligned() && this.valign == 1) {
+         this.field_18 = this.field_19 = 0.0;
+      } else {
+         SGNode child = this.getChild();
+         if (child == null) {
+            this.field_18 = this.field_19 = 0.0;
+         } else {
+            Rectangle2D bounds;
+            if (child instanceof SGText) {
+               bounds = ((SGText)child).getLogicalBounds((AffineTransform)null);
+            } else {
+               bounds = child.getBounds();
+            }
+
+            if (this.isRightAligned()) {
+               this.field_18 = -bounds.getWidth();
+            } else if (this.halign == 0) {
+               this.field_18 = -bounds.getWidth() / 2.0;
+            } else {
+               this.field_18 = 0.0;
+            }
+
+            if (this.valign == 3) {
+               this.field_19 = -bounds.getHeight();
+            } else if (this.valign == 0) {
+               this.field_19 = -bounds.getHeight() / 2.0;
+            } else {
+               this.field_19 = 0.0;
+            }
+
+         }
+      }
+   }
+
+   private void validateTransform() {
+      if (!this.transformValid) {
+         if ((this.getDirtyState() & 40) == 0) {
+            this.transformValid = true;
+         }
+
+         this.updateTransform();
+      }
+
+   }
+
+   private static Point2D setPoint(Point2D dst, double x, double y) {
+      if (dst == null) {
+         dst = new Point2D.Float();
+      }
+
+      ((Point2D)dst).setLocation(x, y);
+      return (Point2D)dst;
+   }
+
+   public Point2D transform(Point2D src, Point2D dst) {
+      this.validateTransform();
+      return setPoint(dst, src.getX() + this.field_18, src.getY() + this.field_19);
+   }
+
+   public Point2D inverseTransform(Point2D src, Point2D dst) {
+      this.validateTransform();
+      return setPoint(dst, src.getX() - this.field_18, src.getY() - this.field_19);
+   }
+
+   public void concatenateInto(AffineTransform at) {
+      this.validateTransform();
+      at.translate(this.field_18, this.field_19);
+   }
+
+   public void concatenateInto(Graphics2D g2d) {
+      this.validateTransform();
+      g2d.translate(this.field_18, this.field_19);
+   }
+
+   public void getTransform(AffineTransform at) {
+      this.validateTransform();
+      at.setToTranslation(this.field_18, this.field_19);
+   }
+
+   public void reset() {
+      this.setHorizontalAlignment(10);
+      this.setVerticalAlignment(1);
+   }
+
+   void render(Graphics2D g, Rectangle dirtyRegion, boolean clearDirty) {
+      if (!this.isVisible()) {
+         if (clearDirty) {
+            this.clearDirty();
+         }
+
+      } else {
+         if (dirtyRegion != null) {
+            Rectangle2D bounds = this.getTransformedBounds();
+            if (bounds == null || !bounds.intersects(dirtyRegion)) {
+               if (clearDirty) {
+                  this.clearDirty();
+               }
+
+               return;
+            }
+         }
+
+         SGNode child = this.getChild();
+         if (child != null) {
+            this.validateTransform();
+            g.translate(this.field_18, this.field_19);
+            child.render(g, dirtyRegion, clearDirty);
+            g.translate(-this.field_18, -this.field_19);
+         }
+
+         if (clearDirty) {
+            this.clearDirty();
+         }
+
+      }
+   }
+
+   static {
+      ltr = ComponentOrientation.getOrientation(Locale.getDefault()) == ComponentOrientation.LEFT_TO_RIGHT;
+   }
 }

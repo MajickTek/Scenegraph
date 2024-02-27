@@ -1,412 +1,389 @@
-/*
- * Copyright 2007 Sun Microsystems, Inc.  All Rights Reserved.
- * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
- *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
- *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
- *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
- */
-
 package com.sun.scenario.scenegraph;
 
-import java.awt.geom.Point2D;
+import java.awt.Graphics2D;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.NoninvertibleTransformException;
+import java.awt.geom.Point2D;
 
-/**
- *
- * @author Flar
- */
 class DesktopSGTransformFactory extends SGTransform.Factory {
-    
-    /** Creates a new instance of DesktopSGTransformFactory */
-    public DesktopSGTransformFactory() {
-    }
-    
-    @Override
-    SGTransform.Translate makeTranslate(double tx, double ty) {
-        return new Translate(tx, ty);
-    }
-    
-    @Override
-    SGTransform.Scale makeScale(double sx, double sy) {
-        return new Scale(sx, sy);
-    }
-    
-    @Override
-    SGTransform.Rotate makeRotate(double theta) {
-        return new Rotate(theta);
-    }
-    
-    @Override
-    SGTransform.Shear makeShear(double shx, double shy) {
-        return new Shear(shx, shy);
-    }
+   public DesktopSGTransformFactory() {
+   }
 
-    @Override
-    SGTransform.Affine makeAffine(AffineTransform at) {
-        return new Affine(at);
-    }
+   SGTransform.Translate makeTranslate(double tx, double ty) {
+      return new Translate(tx, ty);
+   }
 
-    static Point2D setPoint(Point2D dst, double x, double y) {
-        if (dst == null) {
-            // REMIND: This should be changed back to Double when we
-            // create a separate Phone/Embedded factory...
-            dst = new Point2D.Float();
-        }
-        dst.setLocation(x, y);
-        return dst;
-    }
+   SGTransform.Scale makeScale(double sx, double sy) {
+      return new Scale(sx, sy);
+   }
 
-    // REMIND: These classes must be public for beans property setters to work
-    public static final class Translate extends SGTransform.Translate {
-        private double tx;
-        private double ty;
-        
-        public Translate(double tx, double ty) {
-            this.tx = tx;
-            this.ty = ty;
-        }
-    
-        @Override 
-        public Point2D transform(Point2D src, Point2D dst) {
-            return setPoint(dst, src.getX() + tx, src.getY() + ty);
-        }
+   SGTransform.Rotate makeRotate(double theta) {
+      return new Rotate(theta);
+   }
 
-        @Override 
-        public Point2D inverseTransform(Point2D src, Point2D dst) {
-            return setPoint(dst, src.getX() - tx, src.getY() - ty);
-        }
+   SGTransform.Shear makeShear(double shx, double shy) {
+      return new Shear(shx, shy);
+   }
 
-        @Override
-        public void concatenateInto(AffineTransform at) {
-            at.translate(tx, ty);
-        }
+   SGTransform.Affine makeAffine(AffineTransform at) {
+      return new Affine(at);
+   }
 
-        @Override
-        public void getTransform(AffineTransform at) {
-            at.setToTranslation(tx, ty);
-        }
+   static Point2D setPoint(Point2D dst, double x, double y) {
+      if (dst == null) {
+         dst = new Point2D.Float();
+      }
 
-        @Override 
-        public double getTranslateX() {
-            return tx;
-        }
+      ((Point2D)dst).setLocation(x, y);
+      return (Point2D)dst;
+   }
 
-        @Override 
-        public double getTranslateY() {
-            return ty;
-        }
+   public static final class Affine extends SGTransform.Affine {
+      // $FF: renamed from: at java.awt.geom.AffineTransform
+      private AffineTransform field_13;
 
-        @Override 
-        public void setTranslateX(double tx) {
-            this.tx = tx;
-            invalidateTransform();
-        }
+      public Affine(AffineTransform at) {
+         if (at == null) {
+            this.field_13 = new AffineTransform();
+         } else {
+            this.field_13 = new AffineTransform(at);
+         }
 
-        @Override 
-        public void setTranslateY(double ty) {
-            this.ty = ty;
-            invalidateTransform();
-        }
+      }
 
-        @Override 
-        public void setTranslation(double tx, double ty) {
-            this.tx = tx;
-            this.ty = ty;
-            invalidateTransform();
-        }
+      public Point2D transform(Point2D src, Point2D dst) {
+         return this.field_13.transform(src, dst);
+      }
 
-        @Override 
-        public void translateBy(double tx, double ty) {
-            this.tx += tx;
-            this.ty += ty;
-            invalidateTransform();
-        }
-    }
+      public Point2D inverseTransform(Point2D src, Point2D dst) {
+         try {
+            return this.field_13.inverseTransform(src, dst);
+         } catch (NoninvertibleTransformException var4) {
+            return DesktopSGTransformFactory.setPoint(dst, src.getX(), src.getY());
+         }
+      }
 
-    // REMIND: These classes must be public for beans property setters to work
-    public static final class Scale extends SGTransform.Scale {
-        private double sx;
-        private double sy;
-        
-        public Scale(double sx, double sy) {
-            this.sx = sx;
-            this.sy = sy;
-        }
+      public void concatenateInto(AffineTransform at) {
+         at.concatenate(this.field_13);
+      }
 
-        @Override 
-        public Point2D transform(Point2D src, Point2D dst) {
-            double retx = src.getX() * sx;
-            double rety = src.getY() * sy;
-            return setPoint(dst, retx, rety);
-        }
+      public void concatenateInto(Graphics2D g2d) {
+         g2d.transform(this.field_13);
+      }
 
-        @Override 
-        public Point2D inverseTransform(Point2D src, Point2D dst) {
-            double retx = src.getX() / (sx == 0 ? 1 : sx);
-            double rety = src.getY() / (sy == 0 ? 1 : sy);
-            return setPoint(dst, retx, rety);
-        }
+      public void getTransform(AffineTransform at) {
+         at.setTransform(this.field_13);
+      }
 
-        @Override
-        public void concatenateInto(AffineTransform at) {
-            at.scale(sx, sy);
-        }
+      public AffineTransform getAffine() {
+         return new AffineTransform(this.field_13);
+      }
 
-        @Override
-        public void getTransform(AffineTransform at) {
-            at.setToScale(sx, sy);
-        }
+      public void setAffine(AffineTransform at) {
+         if (!this.field_13.equals(at)) {
+            this.field_13.setTransform(at);
+            this.invalidateTransform();
+         }
 
-        @Override 
-        public double getScaleX() {
-            return sx;
-        }
+      }
 
-        @Override 
-        public double getScaleY() {
-            return sy;
-        }
+      public void transformBy(AffineTransform at) {
+         if (!at.isIdentity()) {
+            this.field_13.concatenate(at);
+            this.invalidateTransform();
+         }
 
-        @Override 
-        public void setScaleX(double sx) {
-            this.sx = sx;
-            invalidateTransform();
-        }
+      }
 
-        @Override 
-        public void setScaleY(double sy) {
-            this.sy = sy;
-            invalidateTransform();
-        }
+      public void reset() {
+         this.field_13.setToIdentity();
+         this.invalidateTransform();
+      }
+   }
 
-        @Override 
-        public void setScale(double sx, double sy) {
-            this.sx = sx;
-            this.sy = sy;
-            invalidateTransform();
-        }
+   public static final class Shear extends SGTransform.Shear {
+      private double shx;
+      private double shy;
 
-        @Override 
-        public void scaleBy(double sx, double sy) {
-            this.sx *= sx;
-            this.sy *= sy;
-            invalidateTransform();
-        }
-    }
-    
-    // REMIND: These classes must be public for beans property setters to work
-    public static final class Rotate extends SGTransform.Rotate {
-        private double theta;
-        
-        public Rotate(double theta) {
+      public Shear(double shx, double shy) {
+         this.shx = shx;
+         this.shy = shy;
+      }
+
+      public Point2D transform(Point2D src, Point2D dst) {
+         double x = src.getX();
+         double y = src.getY();
+         double retx = x + this.shx * y;
+         double rety = y + this.shy * x;
+         return DesktopSGTransformFactory.setPoint(dst, retx, rety);
+      }
+
+      public Point2D inverseTransform(Point2D src, Point2D dst) {
+         double x = src.getX();
+         double y = src.getY();
+         double det = 1.0 - this.shx * this.shy;
+         double retx = x;
+         double rety = y;
+         if (det != 0.0) {
+            retx = x - this.shx * y;
+            rety = y - this.shy * x;
+            retx /= det;
+            rety /= det;
+         }
+
+         return DesktopSGTransformFactory.setPoint(dst, retx, rety);
+      }
+
+      public void concatenateInto(AffineTransform at) {
+         at.shear(this.shx, this.shy);
+      }
+
+      public void concatenateInto(Graphics2D g2d) {
+         g2d.shear(this.shx, this.shy);
+      }
+
+      public void getTransform(AffineTransform at) {
+         at.setToShear(this.shx, this.shy);
+      }
+
+      public double getShearX() {
+         return this.shx;
+      }
+
+      public double getShearY() {
+         return this.shy;
+      }
+
+      public void setShearX(double shx) {
+         if (this.shx != shx) {
+            this.shx = shx;
+            this.invalidateTransform();
+         }
+
+      }
+
+      public void setShearY(double shy) {
+         if (this.shy != shy) {
+            this.shy = shy;
+            this.invalidateTransform();
+         }
+
+      }
+
+      public void setShear(double shx, double shy) {
+         if (this.shx != shx || this.shy != shy) {
+            this.shx = shx;
+            this.shy = shy;
+            this.invalidateTransform();
+         }
+
+      }
+
+      public void shearBy(double shx, double shy) {
+         this.shx *= shx;
+         this.shy *= shy;
+         this.invalidateTransform();
+      }
+   }
+
+   public static final class Rotate extends SGTransform.Rotate {
+      private double theta;
+
+      public Rotate(double theta) {
+         this.theta = theta;
+      }
+
+      static Point2D transform(Point2D src, Point2D dst, double theta) {
+         double sin = Math.sin(theta);
+         double cos = Math.cos(theta);
+         double x = src.getX();
+         double y = src.getY();
+         double retx = x * cos - y * sin;
+         double rety = x * sin + y * cos;
+         return DesktopSGTransformFactory.setPoint(dst, retx, rety);
+      }
+
+      public Point2D transform(Point2D src, Point2D dst) {
+         return transform(src, dst, this.theta);
+      }
+
+      public Point2D inverseTransform(Point2D src, Point2D dst) {
+         return transform(src, dst, -this.theta);
+      }
+
+      public void concatenateInto(AffineTransform at) {
+         at.rotate(this.theta);
+      }
+
+      public void concatenateInto(Graphics2D g2d) {
+         g2d.rotate(this.theta);
+      }
+
+      public void getTransform(AffineTransform at) {
+         at.setToRotation(this.theta);
+      }
+
+      public double getRotation() {
+         return this.theta;
+      }
+
+      public void setRotation(double theta) {
+         if (this.theta != theta) {
             this.theta = theta;
-        }
-        
-        static Point2D transform(Point2D src, Point2D dst, double theta) {
-            double sin = Math.sin(theta);
-            double cos = Math.cos(theta);
-            double x = src.getX();
-            double y = src.getY();
-            double retx = x * cos - y * sin;
-            double rety = x * sin + y * cos;
-            return setPoint(dst, retx, rety);
-        }
-    
-        @Override 
-        public Point2D transform(Point2D src, Point2D dst) {
-            return transform(src, dst, theta);
-        }
+            this.invalidateTransform();
+         }
 
-        @Override 
-        public Point2D inverseTransform(Point2D src, Point2D dst) {
-            return transform(src, dst, -theta);
-        }
-    
-        @Override
-        public void concatenateInto(AffineTransform at) {
-            at.rotate(theta);
-        }
+      }
 
-        @Override
-        public void getTransform(AffineTransform at) {
-            at.setToRotation(theta);
-        }
+      public void rotateBy(double theta) {
+         this.theta += theta;
+         this.invalidateTransform();
+      }
+   }
 
-        @Override 
-        public double getRotation() {
-            return theta;
-        }
+   public static final class Scale extends SGTransform.Scale {
+      // $FF: renamed from: sx double
+      private double field_14;
+      // $FF: renamed from: sy double
+      private double field_15;
 
-        @Override 
-        public void setRotation(double theta) {
-            this.theta = theta;
-            invalidateTransform();
-        }
+      public Scale(double sx, double sy) {
+         this.field_14 = sx;
+         this.field_15 = sy;
+      }
 
-        @Override 
-        public void rotateBy(double theta) {
-            this.theta += theta;
-            invalidateTransform();
-        }
-    }
+      public Point2D transform(Point2D src, Point2D dst) {
+         double retx = src.getX() * this.field_14;
+         double rety = src.getY() * this.field_15;
+         return DesktopSGTransformFactory.setPoint(dst, retx, rety);
+      }
 
-    // REMIND: These classes must be public for beans property setters to work
-    public static final class Shear extends SGTransform.Shear {
-        private double shx;
-        private double shy;
+      public Point2D inverseTransform(Point2D src, Point2D dst) {
+         double retx = src.getX() / (this.field_14 == 0.0 ? 1.0 : this.field_14);
+         double rety = src.getY() / (this.field_15 == 0.0 ? 1.0 : this.field_15);
+         return DesktopSGTransformFactory.setPoint(dst, retx, rety);
+      }
 
-        public Shear(double shx, double shy) {
-            this.shx = shx;
-            this.shy = shy;
-        }
+      public void concatenateInto(AffineTransform at) {
+         at.scale(this.field_14, this.field_15);
+      }
 
-        @Override 
-        public Point2D transform(Point2D src, Point2D dst) {
-            double x = src.getX();
-            double y = src.getY();
-            double retx = x + shx * y;
-            double rety = y + shy * x;
-            return setPoint(dst, retx, rety);
-        }
+      public void concatenateInto(Graphics2D g2d) {
+         g2d.scale(this.field_14, this.field_15);
+      }
 
-        @Override 
-        public Point2D inverseTransform(Point2D src, Point2D dst) {
-            double x = src.getX();
-            double y = src.getY();
-            double det = 1 - shx * shy;
-            double retx = x;
-            double rety = y;
-            // REMIND: are x,y really the best answer if non-invertible?
-            if (det != 0) {
-                retx -= shx * y;
-                rety -= shy * x;
-                retx /= det;
-                rety /= det;
-            }
-            return setPoint(dst, retx, rety);
-        }
+      public void getTransform(AffineTransform at) {
+         at.setToScale(this.field_14, this.field_15);
+      }
 
-        @Override
-        public void concatenateInto(AffineTransform at) {
-            at.shear(shx, shy);
-        }
+      public double getScaleX() {
+         return this.field_14;
+      }
 
-        @Override
-        public void getTransform(AffineTransform at) {
-            at.setToShear(shx, shy);
-        }
+      public double getScaleY() {
+         return this.field_15;
+      }
 
-        @Override 
-        public double getShearX() {
-            return shx;
-        }
+      public void setScaleX(double sx) {
+         if (this.field_14 != sx) {
+            this.field_14 = sx;
+            this.invalidateTransform();
+         }
 
-        @Override 
-        public double getShearY() {
-            return shy;
-        }
+      }
 
-        @Override 
-        public void setShearX(double shx) {
-            this.shx = shx;
-            invalidateTransform();
-        }
+      public void setScaleY(double sy) {
+         if (this.field_15 != sy) {
+            this.field_15 = sy;
+            this.invalidateTransform();
+         }
 
-        @Override 
-        public void setShearY(double shy) {
-            this.shy = shy;
-            invalidateTransform();
-        }
+      }
 
-        @Override 
-        public void setShear(double shx, double shy) {
-            this.shx = shx;
-            this.shy = shy;
-            invalidateTransform();
-        }
+      public void setScale(double sx, double sy) {
+         if (this.field_14 != sx || this.field_15 != sy) {
+            this.field_14 = sx;
+            this.field_15 = sy;
+            this.invalidateTransform();
+         }
 
-        @Override 
-        public void shearBy(double shx, double shy) {
-            // REMIND: Is this correct?
-            this.shx *= shx;
-            this.shy *= shy;
-            invalidateTransform();
-        }
-    }
+      }
 
-    // REMIND: These classes must be public for beans property setters to work
-    public static final class Affine extends SGTransform.Affine {
-        private AffineTransform at;
+      public void scaleBy(double sx, double sy) {
+         this.field_14 *= sx;
+         this.field_15 *= sy;
+         this.invalidateTransform();
+      }
+   }
 
-        public Affine(AffineTransform at) {
-            if (at == null) {
-                this.at = new AffineTransform();
-            } else {
-                this.at = new AffineTransform(at);
-            }
-        }
+   public static final class Translate extends SGTransform.Translate {
+      // $FF: renamed from: tx double
+      private double field_16;
+      // $FF: renamed from: ty double
+      private double field_17;
 
-        @Override 
-        public Point2D transform(Point2D src, Point2D dst) {
-            return at.transform(src, dst);
-        }
+      public Translate(double tx, double ty) {
+         this.field_16 = tx;
+         this.field_17 = ty;
+      }
 
-        @Override 
-        public Point2D inverseTransform(Point2D src, Point2D dst) {
-            try {
-                return at.inverseTransform(src, dst);
-            } catch (NoninvertibleTransformException e) {
-                return setPoint(dst, src.getX(), src.getY());
-            }
-        }
+      public Point2D transform(Point2D src, Point2D dst) {
+         return DesktopSGTransformFactory.setPoint(dst, src.getX() + this.field_16, src.getY() + this.field_17);
+      }
 
-        @Override
-        public void concatenateInto(AffineTransform at) {
-            at.concatenate(this.at);
-        }
+      public Point2D inverseTransform(Point2D src, Point2D dst) {
+         return DesktopSGTransformFactory.setPoint(dst, src.getX() - this.field_16, src.getY() - this.field_17);
+      }
 
-        @Override
-        public void getTransform(AffineTransform at) {
-            at.setTransform(this.at);
-        }
+      public void concatenateInto(AffineTransform at) {
+         at.translate(this.field_16, this.field_17);
+      }
 
-        @Override 
-        public AffineTransform getAffine() {
-            return new AffineTransform(at);
-        }
+      public void concatenateInto(Graphics2D g2d) {
+         g2d.translate(this.field_16, this.field_17);
+      }
 
-        @Override 
-        public void setAffine(AffineTransform at) {
-            this.at.setTransform(at);
-            invalidateTransform();
-        }
+      public void getTransform(AffineTransform at) {
+         at.setToTranslation(this.field_16, this.field_17);
+      }
 
-        @Override 
-        public void transformBy(AffineTransform at) {
-            this.at.concatenate(at);
-            invalidateTransform();
-        }
+      public double getTranslateX() {
+         return this.field_16;
+      }
 
-        @Override
-        public void reset() {
-            this.at.setToIdentity();
-            invalidateTransform();
-        }
-    }
+      public double getTranslateY() {
+         return this.field_17;
+      }
+
+      public void setTranslateX(double tx) {
+         if (this.field_16 != tx) {
+            this.field_16 = tx;
+            this.invalidateTransform();
+         }
+
+      }
+
+      public void setTranslateY(double ty) {
+         if (this.field_17 != ty) {
+            this.field_17 = ty;
+            this.invalidateTransform();
+         }
+
+      }
+
+      public void setTranslation(double tx, double ty) {
+         if (this.field_16 != tx || this.field_17 != ty) {
+            this.field_16 = tx;
+            this.field_17 = ty;
+            this.invalidateTransform();
+         }
+
+      }
+
+      public void translateBy(double tx, double ty) {
+         this.field_16 += tx;
+         this.field_17 += ty;
+         this.invalidateTransform();
+      }
+   }
 }

@@ -1,38 +1,12 @@
-/*
- * Copyright 2007 Sun Microsystems, Inc.  All Rights Reserved.
- * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
- *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
- *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
- *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
- */
-
 package com.sun.scenario.scenegraph;
 
-import static java.awt.event.MouseEvent.MOUSE_CLICKED;
-import static java.awt.event.MouseEvent.MOUSE_DRAGGED;
-import static java.awt.event.MouseEvent.MOUSE_ENTERED;
-import static java.awt.event.MouseEvent.MOUSE_EXITED;
-import static java.awt.event.MouseEvent.MOUSE_MOVED;
-import static java.awt.event.MouseEvent.MOUSE_PRESSED;
-import static java.awt.event.MouseEvent.MOUSE_RELEASED;
-import static java.awt.event.MouseEvent.MOUSE_WHEEL;
-
+import com.sun.scenario.scenegraph.event.SGFocusListener;
+import com.sun.scenario.scenegraph.event.SGKeyListener;
+import com.sun.scenario.scenegraph.event.SGMouseListener;
+import com.sun.scenario.scenegraph.event.SGNodeListener;
 import java.awt.Cursor;
+import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.event.FocusEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
@@ -44,741 +18,681 @@ import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import com.sun.scenario.scenegraph.event.SGFocusListener;
-import com.sun.scenario.scenegraph.event.SGKeyListener;
-import com.sun.scenario.scenegraph.event.SGMouseListener;
-import com.sun.scenario.scenegraph.event.SGNodeEvent;
-import com.sun.scenario.scenegraph.event.SGNodeListener;
-
-
-/**
- * Base class for scene graph nodes.  Nodes define a "local" coordinate
- * system like the one used by AWT/Swing: x increases to the right, y 
- * increases downwards.  
- * 
- * @author Chet Haase
- * @author Hans Muller
- */
 public abstract class SGNode {
-    private Object parent;
-    private Map<String, Object> attributeMap;
-    private List<SGNodeListener> nodeListeners = null;
-    private List<SGMouseListener> mouseListeners = null;
-    
-    @SuppressWarnings("unchecked") 
-    private List<SGKeyListener> keyListeners = Collections.EMPTY_LIST;
-    @SuppressWarnings("unchecked")
-    private List<SGFocusListener> focusListeners = Collections.EMPTY_LIST;
-    
-    private boolean visible = true;
-    private String id;
+   private Object parent;
+   private Map<String, Object> attributeMap;
+   private List<SGNodeListener> nodeListeners = null;
+   private List<SGMouseListener> mouseListeners = null;
+   private List<SGKeyListener> keyListeners;
+   private List<SGFocusListener> focusListeners;
+   private boolean visible;
+   // $FF: renamed from: id java.lang.String
+   private String field_12;
+   private Rectangle2D bounds;
+   private Rectangle2D transformedBounds;
+   private AffineTransform cachedAccumXform;
+   private Rectangle2D dirtyRegion;
+   private Cursor cursor;
+   private boolean isMouseBlocker;
+   private boolean isFocusEnabled;
+   static final int DIRTY_NONE = 0;
+   static final int DIRTY_SUBREGION = 1;
+   static final int DIRTY_VISUAL = 2;
+   static final int DIRTY_BOUNDS = 4;
+   static final int DIRTY_TRANSFORM = 8;
+   static final int DIRTY_CHILDREN_VISUAL = 16;
+   static final int DIRTY_CHILDREN_BOUNDS = 32;
+   private int dirtyState;
+   private boolean paused;
+   private int cachedFlags;
+   static final int BOUNDS_EVENT = 2;
+   static final int TRANSFORMED_BOUNDS_EVENT = 4;
+   private int eventFlags;
 
-    private Rectangle2D cachedAccumBounds;
-    private AffineTransform cachedAccumXform;
-    
-    private Cursor cursor = null;
-    
-    public final boolean isVisible() {
-        return visible;
-    }
-    
-    public void setVisible(boolean visible) {
-        if (this.visible != visible) {
-            if (visible) {
-                this.visible = true;
-                markDirty(true);
+   public SGNode() {
+      this.keyListeners = Collections.EMPTY_LIST;
+      this.focusListeners = Collections.EMPTY_LIST;
+      this.visible = true;
+      this.cursor = null;
+      this.isMouseBlocker = false;
+      this.isFocusEnabled = true;
+      this.dirtyState = 2;
+      this.eventFlags = 0;
+   }
+
+   public final boolean isVisible() {
+      return this.visible;
+   }
+
+   public void setVisible(boolean visible) {
+      if (this.visible != visible) {
+         if (visible) {
+            this.visible = true;
+            if (this.parent instanceof SGParent) {
+               ((SGParent)this.parent).boundsChanged();
+            }
+
+            this.markDirty(2);
+         } else {
+            if (this.parent instanceof SGParent) {
+               ((SGParent)this.parent).boundsChanged();
+            }
+
+            this.markDirty(2);
+            this.visible = false;
+            FocusHandler.removeNotify(this);
+         }
+
+         this.updateCursor();
+      }
+
+   }
+
+   public final boolean isMouseBlocker() {
+      return this.isMouseBlocker;
+   }
+
+   public final void setMouseBlocker(boolean value) {
+      if (this.isMouseBlocker != value) {
+         this.isMouseBlocker = value;
+         this.updateCursor();
+      }
+
+   }
+
+   public final boolean isFocusEnabled() {
+      return this.isFocusEnabled;
+   }
+
+   public final void setFocusEnabled(boolean enabled) {
+      if (this.isFocusEnabled != enabled) {
+         this.isFocusEnabled = enabled;
+         if (!this.isFocusEnabled) {
+            FocusHandler.removeNotify(this);
+         }
+      }
+
+   }
+
+   public final String getID() {
+      return this.field_12;
+   }
+
+   public final void setID(String id) {
+      this.field_12 = id;
+   }
+
+   public SGNode lookup(String id) {
+      return id.equals(this.getID()) ? this : null;
+   }
+
+   public String toString() {
+      return this.field_12 + " " + super.toString();
+   }
+
+   public SGParent getParent() {
+      return this.parent instanceof JSGPanel ? null : (SGParent)this.parent;
+   }
+
+   void setParent(Object parent) {
+      if (this.parent != parent) {
+         if (this.parent instanceof SGParent) {
+            SGParent p = (SGParent)this.parent;
+            p.boundsChanged();
+         }
+
+         assert parent == null || parent instanceof SGParent || parent instanceof JSGPanel;
+
+         this.parent = parent;
+         if (this.parent != null) {
+            this.boundsChanged();
+         }
+
+         this.transformChanged();
+      }
+   }
+
+   public JSGPanel getPanel() {
+      for(Object node = this.parent; node != null; node = ((SGNode)node).parent) {
+         if (node instanceof JSGPanel) {
+            return (JSGPanel)node;
+         }
+      }
+
+      return null;
+   }
+
+   public Rectangle2D getBounds() {
+      if (this.bounds == null) {
+         this.bounds = this.getBounds((AffineTransform)null);
+         this.dirtyState &= -37;
+      }
+
+      return this.bounds;
+   }
+
+   public abstract Rectangle2D getBounds(AffineTransform var1);
+
+   public final Rectangle2D getTransformedBounds() {
+      if (this.transformedBounds == null || (this.dirtyState & 4 | 32 | 8) != 0) {
+         this.transformedBounds = this.calculateAccumBounds();
+      }
+
+      return this.transformedBounds;
+   }
+
+   Rectangle2D calculateAccumBounds() {
+      return this.getBounds(this.getCumulativeTransform());
+   }
+
+   final AffineTransform getCumulativeTransform() {
+      if (this.cachedAccumXform == null) {
+         this.cachedAccumXform = this.updateCumulativeTransform(this.cachedAccumXform);
+         this.dirtyState &= -9;
+      }
+
+      return this.cachedAccumXform;
+   }
+
+   AffineTransform updateCumulativeTransform(AffineTransform oldAccumXform) {
+      return this.parent instanceof SGNode ? ((SGNode)this.parent).getCumulativeTransform() : new AffineTransform();
+   }
+
+   public Point2D globalToLocal(Point2D global, Point2D local) {
+      try {
+         return this.getCumulativeTransform().inverseTransform(global, (Point2D)local);
+      } catch (NoninvertibleTransformException var5) {
+         for(SGNode cur = this; cur != null; cur = ((SGNode)cur).getParent()) {
+            if (cur instanceof SGTransform) {
+               global = ((SGTransform)this).inverseTransform(global, (Point2D)local);
+               local = global;
+            }
+         }
+
+         if (local != global) {
+            if (local == null) {
+               local = new Point2D.Float();
+            }
+
+            ((Point2D)local).setLocation(global);
+         }
+
+         return (Point2D)local;
+      }
+   }
+
+   public Point2D localToGlobal(Point2D local, Point2D global) {
+      return this.getCumulativeTransform().transform(global, local);
+   }
+
+   public boolean contains(Point2D point) {
+      if (point == null) {
+         throw new IllegalArgumentException("null point");
+      } else {
+         Rectangle2D bounds = this.getBounds();
+         return bounds.contains(point);
+      }
+   }
+
+   private boolean maybeAppend(boolean b, SGNode n, List<SGNode> l) {
+      if (b) {
+         l.add(n);
+      }
+
+      return b;
+   }
+
+   private boolean pickRecursive(SGNode node, Point2D p, List<SGNode> rv) {
+      if (node.isVisible()) {
+         if (node instanceof SGLeaf) {
+            return this.maybeAppend(node.contains(p), node, rv);
+         }
+
+         if (node instanceof SGParent) {
+            if (node instanceof SGTransform) {
+               p = ((SGTransform)node).inverseTransform(p, (Point2D)null);
+            } else if (node instanceof SGPerspective) {
+               p = ((SGPerspective)node).inverseTransform(p, (Point2D)null);
+            } else if (node instanceof SGClip && !node.contains(p)) {
+               return false;
+            }
+
+            List<SGNode> children = ((SGParent)node).getChildren();
+            boolean descendantPicked = false;
+
+            for(int i = children.size() - 1; i >= 0; --i) {
+               SGNode child = (SGNode)children.get(i);
+               if (this.pickRecursive(child, p, rv)) {
+                  descendantPicked = true;
+               }
+            }
+
+            return this.maybeAppend(descendantPicked, node, rv);
+         }
+      }
+
+      return false;
+   }
+
+   public List<SGNode> pick(Point2D p) {
+      List<SGNode> rv = new ArrayList();
+      return (List)(this.pickRecursive(this, p, rv) ? rv : Collections.emptyList());
+   }
+
+   final void processMouseEvent(MouseEvent e) {
+      if (this.mouseListeners != null && this.mouseListeners.size() > 0) {
+         Iterator i$ = this.mouseListeners.iterator();
+
+         while(i$.hasNext()) {
+            SGMouseListener ml = (SGMouseListener)i$.next();
+            switch (e.getID()) {
+               case 500:
+                  ml.mouseClicked(e, this);
+                  break;
+               case 501:
+                  ml.mousePressed(e, this);
+                  break;
+               case 502:
+                  ml.mouseReleased(e, this);
+                  break;
+               case 503:
+                  ml.mouseMoved(e, this);
+                  break;
+               case 504:
+                  ml.mouseEntered(e, this);
+                  break;
+               case 505:
+                  ml.mouseExited(e, this);
+                  break;
+               case 506:
+                  ml.mouseDragged(e, this);
+                  break;
+               case 507:
+                  ml.mouseWheelMoved((MouseWheelEvent)e, this);
+            }
+         }
+      }
+
+   }
+
+   public void addMouseListener(SGMouseListener listener) {
+      if (listener == null) {
+         throw new IllegalArgumentException("null listener");
+      } else {
+         if (this.mouseListeners == null) {
+            this.mouseListeners = new ArrayList(1);
+         }
+
+         this.mouseListeners.add(listener);
+      }
+   }
+
+   public void removeMouseListener(SGMouseListener listener) {
+      if (listener == null) {
+         throw new IllegalArgumentException("null listener");
+      } else {
+         if (this.mouseListeners != null) {
+            this.mouseListeners.remove(listener);
+         }
+
+      }
+   }
+
+   public final Object getAttribute(String key) {
+      if (key == null) {
+         throw new IllegalArgumentException("null key");
+      } else {
+         return this.attributeMap == null ? null : this.attributeMap.get(key);
+      }
+   }
+
+   public final void putAttribute(String key, Object value) {
+      if (this.attributeMap == null) {
+         this.attributeMap = new HashMap(1);
+      }
+
+      this.attributeMap.put(key, value);
+   }
+
+   void addDirtyRegion(Rectangle2D r, boolean shareable) {
+      this.dirtyRegion = accumulate(this.dirtyRegion, r, shareable);
+   }
+
+   public void beginChanges() {
+      this.paused = true;
+   }
+
+   public void finishChanges() {
+      if (this.paused) {
+         this.paused = false;
+         this.markDirty(this.cachedFlags);
+         if ((this.cachedFlags & 8) != 0) {
+            this.transformChanged();
+         }
+
+         if ((~this.cachedFlags & 6) == 0) {
+            this.markParentsDirty(48);
+         } else if ((this.cachedFlags & 4) != 0) {
+            this.markParentsDirty(32);
+         } else if ((this.cachedFlags & 2) != 0) {
+            this.markParentsDirty(16);
+         }
+
+         this.dispatchAllPendingEvents();
+      }
+
+   }
+
+   void markDirty(int state) {
+      if (this.paused) {
+         this.cachedFlags |= state;
+      } else {
+         if ((state & 12) != 0) {
+            state |= 2;
+            if (this.transformedBounds != null) {
+               this.addDirtyRegion(this.transformedBounds, false);
+            }
+
+            if ((state & 8) != 0) {
+               this.cachedAccumXform = null;
+               this.eventFlags |= 4;
             } else {
-                markDirty(true);
-                this.visible = false;
+               this.bounds = null;
+               this.eventFlags |= 2;
+               this.eventFlags |= 4;
             }
-            updateCursor();
-        }
-    }
-    
-    public final String getID() {
-        return id;
-    }
-    
-    public final void setID(String id) {
-        this.id = id;
-    }
-    
-    public String toString() {
-        return id + " " + super.toString();
-    }
+         } else if ((state & 32) != 0) {
+            state |= 16;
+            this.bounds = null;
+            this.eventFlags |= 2;
+            this.eventFlags |= 4;
+         }
 
-    public SGParent getParent() { 
-        return (parent instanceof JSGPanel) ? null : (SGParent) parent;
-    }
+         this.dirtyState |= state;
+      }
 
-    final void setParent(Object parent) {
-        assert (parent == null ||
-                parent instanceof SGParent ||
-                parent instanceof JSGPanel);
-        this.parent = parent;
-        updateCursor();
-    }
+   }
 
-    public JSGPanel getPanel() {
-        Object node = parent;
-        while (node != null) {
-            if (node instanceof JSGPanel) {
-                return (JSGPanel)node;
+   final void transformChanged() {
+      if (this.paused) {
+         this.cachedFlags |= 8;
+      } else {
+         this.doTransformChanged();
+      }
+
+   }
+
+   void doTransformChanged() {
+      this.markDirty(8);
+   }
+
+   private final void markParentsDirty(int state) {
+      if (!this.paused) {
+         SGNode n = this;
+
+         while(n.parent instanceof SGNode) {
+            n = (SGNode)n.parent;
+            if ((n.dirtyState & 16) != 0 && state == 16) {
+               break;
             }
-            else {
-                node = ((SGNode)node).parent;
-            }
-        }
-        return null;
-    }
 
-    /**
-     * Returns the bounding box of this node in the coordinate space
-     * inherited from the parent.
-     * This is a convenience method, equivalent to calling
-     * {@code getBounds(null)}.
-     */
-    public final Rectangle2D getBounds() {
-        return getBounds(null);
-    }
+            n.markDirty(state);
+         }
 
-    /**
-     * Returns the bounding box of this node relative to the specified
-     * coordinate space.
-     *
-     * @param transform the transform applied to the geometry
-     */
-    public abstract Rectangle2D getBounds(AffineTransform transform);
+         if (n.parent instanceof JSGPanel && n.isVisible()) {
+            ((JSGPanel)n.parent).markDirty();
+         }
+      }
 
-    /**
-     * Transforms the bounds of this node by the "cumulative transform",
-     * and then returns the bounding box of that transformed shape.
-     */
-    final Rectangle2D getTransformedBoundsRelativeToRoot() {
-        if (cachedAccumBounds == null) {
-            cachedAccumBounds = calculateAccumBounds();
-        }
-        return cachedAccumBounds;
-    }
+   }
 
-    /**
-     * Calculate the accumulated bounds object representing the
-     * global bounds relative to the root of the tree.
-     * The default implementation calculates new bounds based
-     * on the accumulated transform, but SGFilter nodes override
-     * this method to return a shared accumulated bounds object
-     * from their child.
-     */
-    Rectangle2D calculateAccumBounds() {
-        return getBounds(getCumulativeTransform());
-    }
-    
-    /**
-     * Returns the "cumulative transform", which is the concatenation of all
-     * ancestor transforms plus the transform of this node (if present).
-     */
-    final AffineTransform getCumulativeTransform() {
-        if (cachedAccumXform == null) {
-            cachedAccumXform = calculateCumulativeTransform();
-        }
-        return cachedAccumXform;
-    }
+   final void boundsChanged() {
+      this.markDirty(4);
+      this.markParentsDirty(32);
+   }
 
-    /**
-     * Calculates the accumulated product of all transforms back to
-     * the root of the tree.
-     * The default implementation simply returns a shared value
-     * from the parent, but SGTransform nodes will override this
-     * method to return a new modified transform.
-     */
-    AffineTransform calculateCumulativeTransform() {
-        SGNode parent = getParent();
-        if (parent == null) {
-            return new AffineTransform();
-        } else {
-            return parent.getCumulativeTransform();
-        }
-    }
+   final void visualChanged() {
+      this.markDirty(2);
+      this.markParentsDirty(16);
+   }
 
-    /**
-     * Transforms a point from the global coordinate system of the root
-     * node (typically a {@link JSGPanel}) into the local coordinate space
-     * of this SGNode.
-     * The {@code global} parameter must not be null.
-     * If the {@code local} parameter is null then a new {@link Point2D}
-     * object will be created and returned after transforming the point.
-     * The {@code global} and {@code local} parameters may be the same
-     * object and the coordinates will be correctly updated with the
-     * transformed coordinates.
-     *
-     * @param global the coordinates in the global coordinate system to
-     *               be transformed
-     * @param local a {@code Point2D} object to store the results in
-     * @return a {@code Point2D} object containig the transformed coordinates
-     */
-    public Point2D globalToLocal(Point2D global, Point2D local) {
-        try {
-            return getCumulativeTransform().inverseTransform(global, local);
-        } catch (NoninvertibleTransformException e) {
-            // The SGTransform nodes do a "best effort" inverse transform
-            // on points so we can get a better answer than just punting
-            // by asking them to individually "try" to transform the point...
-            SGNode cur = this;
-            while (cur != null) {
-                if (cur instanceof SGTransform) {
-                    global = ((SGTransform) this).inverseTransform(global, local);
-                    local = global;
-                }
-                cur = cur.getParent();
-            }
-            if (local != global) {
-                if (local == null) {
-                    local = new Point2D.Float();
-                }
-                local.setLocation(global);
-            }
-            return local;
-        }
-    }
+   final void markSubregionDirty(Rectangle2D subregion) {
+      this.addDirtyRegion(subregion, false);
+      this.markDirty(1);
+      this.markParentsDirty(16);
+   }
 
+   void clearDirty() {
+      this.dirtyState = 0;
+      this.dirtyRegion = null;
+   }
 
-    /**
-     * Transforms a point from the local coordinate space of
-     * this SGNode into the global coordinate system of the root
-     * node (typically a {@link JSGPanel}).
-     * The {@code local} parameter must not be null.
-     * If the {@code global} parameter is null then a new {@link Point2D}
-     * object will be created and returned after transforming the point.
-     * The {@code local} and {@code global} parameters may be the same
-     * object and the coordinates will be correctly updated with the
-     * transformed coordinates.
-     *
-     * @param local the coordinates in the local coordinate system to
-     *               be transformed
-     * @param global a {@code Point2D} object to store the results in
-     * @return a {@code Point2D} object containig the transformed coordinates
-     */
-    public Point2D localToGlobal(Point2D local, Point2D global) {
-        return getCumulativeTransform().transform(global, local);
-    }
+   final boolean isDirty() {
+      return this.dirtyState != 0;
+   }
 
-    /**
-     * Returns true if the given point (specified in the local/untransformed
-     * coordinate space of this node) is contained within the visual bounds
-     * of this node.  Note that this method does not take visibility
-     * into account, the test is based on the node's geometry only.
-     *
-     * @param point a point in the local coordinate space of this node
-     * @return true if the given point is contained within the visual bounds
-     *     of this node
-     * @throws IllegalArgumentException if {@code point} is null
-     */
-    public boolean contains(Point2D point) {
-        if (point == null) {
-            throw new IllegalArgumentException("null point");
-        }
-        Rectangle2D bounds = getBounds(null);
-        return bounds.contains(point);
-    }
+   final int getDirtyState() {
+      return this.dirtyState;
+   }
 
-    
-    /*
-     * Input handling below...
-     */
-    
-    private boolean maybeAppend(boolean b, SGNode n, List<SGNode> l) {
-        if (b) { l.add(n); }
-        return b;
-    }
+   final int getEventState() {
+      return this.eventFlags;
+   }
 
-    private boolean pickRecursive(SGNode node, Point2D p, List<SGNode> rv) {
-        if (node.isVisible()) {
-            if (node instanceof SGLeaf) {
-                return maybeAppend(node.contains(p), node, rv);
-            } else if (node instanceof SGParent) {
-                if (node instanceof SGTransform) {
-                    p = ((SGTransform) node).inverseTransform(p, null);
-                } else if (node instanceof SGClip) {
-                    if (!node.contains(p)) {
-                        return false;
-                    }
-                }
-                List<SGNode> children = ((SGParent)node).getChildren();
-                boolean descendantPicked = false;
-                for (int i = children.size() - 1; i >= 0; i--) {
-                    SGNode child = children.get(i);
-                    if (pickRecursive(child, p, rv)) {
-                        descendantPicked = true;
-                    }
-                }
-                return maybeAppend(descendantPicked, node, rv);
-            } 
-        }
-        return false;
-    }
+   static Rectangle2D accumulate(Rectangle2D accumulator, Rectangle2D newrect) {
+      return accumulate(accumulator, newrect, false);
+   }
 
-    /** 
-     * Returns a list of the visible nodes that overlap the specified
-     * point in the same order they'd be considered for event
-     * dispatching, topmost leaf first.  The point {@code p} is
-     * specified in local coordinates.
-     */
-    public List<SGNode> pick(Point2D p) {
-        List<SGNode> rv = new ArrayList<SGNode>();
-        if (pickRecursive(this, p, rv)) {
-            return rv;
-        }
-        else {
-            return Collections.emptyList();
-        }
-    }
+   static Rectangle2D accumulate(Rectangle2D accumulator, Rectangle2D newrect, boolean newrectshareable) {
+      if (newrect != null && newrect.getWidth() > 0.0 && newrect.getHeight() > 0.0) {
+         if (accumulator == null) {
+            accumulator = newrectshareable ? newrect : (Rectangle2D)newrect.clone();
+         } else {
+            accumulator.add(newrect);
+         }
+      }
 
-    final void processMouseEvent(MouseEvent e) {
-        if ((mouseListeners != null) && (mouseListeners.size() > 0)) {
-            for (SGMouseListener ml : mouseListeners) {
-                switch(e.getID()) {
-                case MOUSE_PRESSED:  ml.mousePressed(e, this);   break;
-                case MOUSE_RELEASED: ml.mouseReleased(e, this);  break;
-                case MOUSE_CLICKED:  ml.mouseClicked(e, this);   break;
-                case MOUSE_ENTERED:  ml.mouseEntered(e, this);   break;
-                case MOUSE_EXITED:   ml.mouseExited(e, this);    break;
-                case MOUSE_MOVED:    ml.mouseMoved(e, this);     break;
-                case MOUSE_DRAGGED:  ml.mouseDragged(e, this);   break;
-                case MOUSE_WHEEL:    
-                    ml.mouseWheelMoved((MouseWheelEvent)e, this); 
-                    break;
-                }
-            }
-        }
-    }
+      return accumulator;
+   }
 
-    public void addMouseListener(SGMouseListener listener) { 
-	if (listener == null) {
-	    throw new IllegalArgumentException("null listener");
-	}
-        if (mouseListeners == null) {
-            mouseListeners = new ArrayList<SGMouseListener>(1);
-        }
-        mouseListeners.add(listener);
-    }
+   final Rectangle2D accumulateDirty(Rectangle2D r, Rectangle2D clip) {
+      if (this.dirtyRegion != null) {
+         r = accumulate(r, this.dirtyRegion, false);
+      }
 
-    public void removeMouseListener(SGMouseListener listener) { 
-	if (listener == null) {
-	    throw new IllegalArgumentException("null listener");
-	}
-        if (mouseListeners != null) {
-            mouseListeners.remove(listener);
-        }
-    }
+      if ((this.dirtyState & 2) != 0) {
+         r = accumulate(r, this.getTransformedBounds(), false);
+      } else if ((this.dirtyState & 16) != 0) {
+         r = this.accumulateDirtyChildren(r, clip);
+      }
 
+      return r;
+   }
 
-    /*
-     * Attribute-related methods below...
-     */
-    
-    public final Object getAttribute(String key) {
-        if (key == null) {
-            throw new IllegalArgumentException("null key");
-        }
-        return (attributeMap == null) ? null : attributeMap.get(key);
-    }
+   Rectangle2D accumulateDirtyChildren(Rectangle2D r, Rectangle2D clip) {
+      return r;
+   }
 
-    public final void putAttribute(String key, Object value) {
-        if (attributeMap == null) {
-            attributeMap = new HashMap<String, Object>(1);
-        }
-        attributeMap.put(key, value);
-    }
+   public final void render(Graphics2D g) {
+      this.render(g, (Rectangle)null, true);
+   }
 
-    
-    /*
-     * Dirty state/region management below...
-     */
+   abstract void render(Graphics2D var1, Rectangle var2, boolean var3);
 
-    /**
-     * This node is completely clean, and so are all of its descendents.
-     */
-    static final int DIRTY_NONE            = (0 << 0);
-    /**
-     * This node has changed its overall visual state.
-     */
-    static final int DIRTY_VISUAL          = (1 << 0);
-    /**
-     * This node has changed only a subregion of its overall visual state.
-     * (Only applicable to SGLeaf nodes.)
-     */
-    static final int DIRTY_SUBREGION       = (1 << 1);
-    /**
-     * This node has changed its bounds, so it is important to account for
-     * both the former bounds and its new, updated bounds.
-     */
-    static final int DIRTY_BOUNDS          = (1 << 2);
-    /**
-     * One or more of this node's descendents has changed its visual state.
-     * (Only applicable to SGGroup and SGFilter nodes.)
-     */
-    static final int DIRTY_CHILDREN_VISUAL = (1 << 3);
-    /**
-     * One or more of this node's descendents has had a change in bounds,
-     * which means that the overall bounds of this group will need recalculation.
-     * (Only applicable to SGGroup and SGFilter nodes.)
-     */
-    static final int DIRTY_CHILDREN_BOUNDS = (1 << 4);
-    
-    /**
-     * The dirty state of this node.  This is initialized to DIRTY_VISUAL
-     * so that this node is painted for the very first paint cycle.
-     */
-    private int dirtyState = DIRTY_VISUAL;
-    
-    /**
-     * The most recently painted bounds of this node (transformed relative
-     * to the root node, i.e., in device space).  This field is initially
-     * set to null and is updated everytime the node is actually rendered
-     * to the destination.  It is later used in the case of DIRTY_BOUNDS
-     * for the purposes of accumulating the former (dirty) bounds of a
-     * particular node.
-     */
-    private Rectangle2D lastPaintedBounds;
-    
-    private void markDirty(int state) {
-        // only mark us if we haven't been marked with this particular
-        // dirty state before...
-        // and only propagate if we are visible
-        if (isVisible() && (dirtyState & state) == 0) {
-            // mark this node dirty
-            dirtyState |= state;
+   public final void addNodeListener(SGNodeListener listener) {
+      if (listener == null) {
+         throw new IllegalArgumentException("null listener");
+      } else {
+         if (this.nodeListeners == null) {
+            this.nodeListeners = new ArrayList(1);
+         }
 
-            // walk up the tree and mark the entire branch dirty
-            if (parent instanceof SGNode) {
-                if (state == DIRTY_VISUAL || state == DIRTY_SUBREGION) {
-                    // tell our ancestors that at least one descendent has
-                    // changed its visual state
-                    state = DIRTY_CHILDREN_VISUAL;
-                } else if (state == DIRTY_BOUNDS) {
-                    // tell our ancestors that at least one descendent has
-                    // changed its bounds
-                    state = DIRTY_CHILDREN_BOUNDS;
-                }
-                ((SGNode)parent).markDirty(state);
-            } else if (parent instanceof JSGPanel) {
-                ((JSGPanel)parent).markDirty();
-            }
-        }
-    }
-    
-    final void markDirty(boolean boundsChanged) {
-        if (boundsChanged) {
-            markDirty(DIRTY_BOUNDS);
-            // we have no choice but to always walk up the entire tree
-            // and invalidate all cached local/accum bounds
-            invalidateLocalBounds();
-        } else {
-            markDirty(DIRTY_VISUAL);
-        }
-    }
-    
-    final void markSubregionDirty() {
-        markDirty(DIRTY_SUBREGION);
-    }
-    
-    void clearDirty() {
-        dirtyState = DIRTY_NONE;
-    }
-    
-    void invalidateAccumBounds() {
-        // this change affects this node and any/all descendents
-        cachedAccumXform = null;
-        cachedAccumBounds = null;
-    }
-    
-    void invalidateLocalBounds() {
-        // this change affects this node and any/all ancestors
-        // (either this group's overall bounds have changed due to
-        // a transform change, or there's been a change in the
-        // bounds of one or more descendents; either way, we need
-        // to invalidate the current cached bounds)
-        cachedAccumBounds = null;
-        
-        // notify any listeners that the local bounds have changed
-        if (nodeListeners != null) {
-            SGNodeEventDispatcher.addNodeEvent(this);
-        }
-        
-        // walk up the tree and mark the invalidate the cached bounds
-        // of every node in this branch
-        // TODO: is there some way to minimize the amount of work done here?
-        SGNode parent = getParent();
-        if (parent != null) {
-            parent.invalidateLocalBounds();
-        }
-    }
-    
-    final void setLastPaintedBounds(Rectangle2D bounds) {
-        // no clone necessary since lastPaintedBounds will not be mutated nor
-        // passed outside this object
-        this.lastPaintedBounds = bounds;
-    }
-    
-    final boolean isDirty() {
-        return (dirtyState != DIRTY_NONE);
-    }
-    
-    final int getDirtyState() {
-        return dirtyState;
-    }
+         this.nodeListeners.add(listener);
+      }
+   }
 
-    /**
-     * Safely accumulates the {@code newrect} rectangle into an existing
-     * {@code accumulator} rectangle and returns the accumulated result.
-     * The result may be {@code null} if the existing {@code accumulator}
-     * was {@code null} and the {@code newrect} is either null or empty.
-     * If the existing {@code accumulator} was not {@code null} then it
-     * is returned, possibly augmented with the union of the bounds of the
-     * two rectangles.
-     * If a non-{@code null} result is returned then it is guaranteed to
-     * be non-empty.
-     * The result is never the same object as {@code newrect}.
-     * <p>
-     * This method provides a convenient mechanism to perform the task
-     * of accumulating rectangles used throughout various parts of
-     * scene graph management while providing workarounds for unexpected
-     * behaviors in the {@link Rectangle2D#add} method which sometimes
-     * produces a non-empty result from combining two empty rectangles.
-     * 
-     * @param accumulator the existing accumulation of rectangle bounds
-     * @param newrect a new rectangle to accumulate
-     * @return the non-empty result of accumulation, or null if the
-     *         accumulation is still empty
-     */
-    static Rectangle2D accumulate(Rectangle2D accumulator,
-                                  Rectangle2D newrect)
-    {
-        return accumulate(accumulator, newrect, false);
-    }
+   public final void removeNodeListener(SGNodeListener listener) {
+      if (listener == null) {
+         throw new IllegalArgumentException("null listener");
+      } else {
+         if (this.nodeListeners != null) {
+            this.nodeListeners.remove(listener);
+         }
 
-    /**
-     * Safely accumulates the {@code newrect} rectangle into an existing
-     * {@code accumulator} rectangle and returns the accumulated result.
-     * The result may be {@code null} if the existing {@code accumulator}
-     * was {@code null} and the {@code newrect} is either null or empty.
-     * If the existing {@code accumulator} was not {@code null} then it
-     * is returned, possibly augmented with the union of the bounds of the
-     * two rectangles.
-     * If a non-{@code null} result is returned then it is guaranteed to
-     * be non-empty.
-     * The result is never the same object as {@code newrect} if
-     * {@code newrectshareable} is false.
-     * <p>
-     * This method provides a convenient mechanism to perform the task
-     * of accumulating rectangles used throughout various parts of
-     * scene graph management while providing workarounds for unexpected
-     * behaviors in the {@link Rectangle2D#add} method which sometimes
-     * produces a non-empty result from combining two empty rectangles.
-     * 
-     * @param accumulator the existing accumulation of rectangle bounds
-     * @param newrect a new rectangle to accumulate
-     * @param newrectshareable a boolean to indicate if the {@code newrect}
-     *        parameter can be shared by using it as the result
-     * @return the non-empty result of accumulation, or null if the
-     *         accumulation is still empty
-     */
-    static Rectangle2D accumulate(Rectangle2D accumulator,
-                                  Rectangle2D newrect,
-                                  boolean newrectshareable)
-    {
-        if (newrect == null || newrect.isEmpty()) {
-            return accumulator;
-        }
-        if (accumulator == null) {
-            // TODO: We really shouldn't be so trusting of the incoming
-            // Rectangle type - we should instantiate a (platform sensitive)
-            // specific type like R2D.Double (desktop) or R2D.Float (phone)
-            return (newrectshareable ? newrect : (Rectangle2D) newrect.clone());
-        }
-        accumulator.add(newrect);
-        return accumulator;
-    }
+      }
+   }
 
-    /*
-     * TODO: We may want to consider maintaining an Area/Region object
-     * instead to preserve non-contiguous dirty regions; using Rectangle
-     * means we're forced to use union(), which will create larger areas
-     * than neccessary in many cases; the downside of Area/Region is that
-     * we may force Java 2D into complex clipping situations, which may
-     * sometimes be slower than the rectangular fast path.
-     */
-    Rectangle2D accumulateDirty(Rectangle2D r) {
-        boolean accumulateCurrentBounds = ((dirtyState & DIRTY_VISUAL) != 0);
+   final void dispatchAllPendingEvents() {
+      if (!this.paused) {
+         SGNode root = this;
 
-        if (((dirtyState & DIRTY_BOUNDS) != 0) ||
-            ((dirtyState & DIRTY_CHILDREN_BOUNDS) != 0))
-        {
-            // add in the node's original bounds
-            if (lastPaintedBounds != null) {
-                r = accumulate(r, lastPaintedBounds, false);
-            }
-            // also ensure that we add the node's current bounds below
-            accumulateCurrentBounds = true;
-        }
-        if (!isVisible()) {
-            return r;
-        }
-        
-        if (accumulateCurrentBounds) {
-            // add in the node's latest bounds
-            r = accumulate(r, getTransformedBoundsRelativeToRoot(), false);
-        } else if ((dirtyState & DIRTY_SUBREGION) != 0) {
-            // add in only the affected subregion, transformed
-            // relative to the root and intersected with the overall
-            // transformed bounds of this node
-            Rectangle2D subregionBounds = ((SGLeaf)this).getSubregionBounds();
-            Rectangle2D fullBounds = getTransformedBoundsRelativeToRoot();
-            if (subregionBounds != null) {
-                AffineTransform accumXform = getCumulativeTransform();
-                subregionBounds =
-                    accumXform.createTransformedShape(subregionBounds).getBounds2D();
-                subregionBounds = subregionBounds.createIntersection(fullBounds);
-            } else {
-                subregionBounds = fullBounds;
-            }
-            if (!subregionBounds.isEmpty()) {
-                boolean srBoundsShareable = (subregionBounds != fullBounds);
-                r = accumulate(r, subregionBounds, srBoundsShareable);
-            }
-        }
+         for(SGParent p = this.getParent(); p != null; p = p.getParent()) {
+            root = p;
+         }
 
-        return r;
-    }
+         ((SGNode)root).dispatchPendingEvents();
+      }
 
-    
-    /*
-     * Event handling below...
-     */
-    
-    public void addNodeListener(SGNodeListener listener) {
-	if (listener == null) {
-	    throw new IllegalArgumentException("null listener");
-	}
-        if (nodeListeners == null) {
-            nodeListeners = new ArrayList<SGNodeListener>(1);
-        }
-        nodeListeners.add(listener);
-    }
+   }
 
-    public void removeNodeListener(SGNodeListener listener) {
-	if (listener == null) {
-	    throw new IllegalArgumentException("null listener");
-	}
-        if (nodeListeners != null) {
-            nodeListeners.remove(listener);
-        }
-    }
-    
-    void dispatchNodeEvent() {
-        if ((nodeListeners != null) && (nodeListeners.size() > 0)) {
-            SGNodeEvent e = SGNodeEvent.createBoundsChangedEvent(this);
-            for (SGNodeListener listener : nodeListeners) {
-                listener.boundsChanged(e);
-            }
-        }
-    }
+   void dispatchPendingEvents() {
+      if ((this.eventFlags & 4) != 0) {
+         this.eventFlags &= -5;
+         this.dispatchTransformEvent();
+      }
 
-    
-    /*
-     * Input event handling below...
-     */
+      if ((this.eventFlags & 2) != 0) {
+         this.eventFlags &= -3;
+         this.dispatchBoundsEvent();
+      }
 
-    public void addKeyListener(SGKeyListener listener) { 
-        if (listener == null) {
-            throw new IllegalArgumentException("null listener");
-        }
-        if (keyListeners == Collections.EMPTY_LIST) {
-            keyListeners = new ArrayList<SGKeyListener>(1);
-        }
-        keyListeners.add(listener);
-    }
+   }
 
-    public void removeKeyListener(SGKeyListener listener) { 
-        if (listener == null) {
-            throw new IllegalArgumentException("null listener");
-        }
-        keyListeners.remove(listener);
-    }
-    public void addFocusListener(SGFocusListener listener) {
-        if (listener == null) {
-            throw new IllegalArgumentException("null listener");
-        }
-        if (focusListeners == Collections.EMPTY_LIST) {
-            focusListeners = new ArrayList<SGFocusListener>(1);
-        }
-        focusListeners.add(listener);
-    }
-    public void removeFocusListener(SGFocusListener listener) {
-        if (listener == null) {
-            throw new IllegalArgumentException("null listener");
-        }
-        focusListeners.remove(listener);
-    }
-    
-    void processKeyEvent(KeyEvent e) {
-        int id = e.getID();
-        for (SGKeyListener listener : keyListeners) {
-            switch(id) {
-            case KeyEvent.KEY_TYPED:
-                listener.keyTyped(e, this);
-                break;
-            case KeyEvent.KEY_PRESSED:
-                listener.keyPressed(e, this);
-                break;
-            case KeyEvent.KEY_RELEASED:
-                listener.keyReleased(e, this);
-                break;
-            }
-        }
-    }
-    
-    void processFocusEvent(FocusEvent e) {
-        int id = e.getID();
-        for (SGFocusListener listener : focusListeners) {
-            switch(id) {
-            case FocusEvent.FOCUS_GAINED:
-                listener.focusGained(e, this);
-                break;
-            case FocusEvent.FOCUS_LOST:
-                listener.focusLost(e, this);
-                break;
-          }
-        }
-    }
-    
-    boolean isFocusable() {
-        return isVisible() && keyListeners.size() > 0;
-    }
-    
-    public final void requestFocus() {
-        FocusHandler.requestFocus(this);
-    }
-    
-    public final void setCursor(Cursor cursor) {
-        this.cursor = cursor;
-        updateCursor();
-    }
-    
-    public final Cursor getCursor() {
-        return cursor;
-    }
-    void updateCursor() {
-        JSGPanel panel = getPanel();
-        if (panel != null) {
-            panel.updateCursor();
-        }
-    }
+   final void dispatchBoundsEvent() {
+      if (this.nodeListeners != null && this.nodeListeners.size() > 0) {
+         for(int i = 0; i < this.nodeListeners.size(); ++i) {
+            ((SGNodeListener)this.nodeListeners.get(i)).boundsChanged(this);
+         }
+      }
 
-    boolean hasOverlappingContents() {
-        return true;
-    }
+   }
+
+   final void dispatchTransformEvent() {
+      if (this.nodeListeners != null && this.nodeListeners.size() > 0) {
+         for(int i = 0; i < this.nodeListeners.size(); ++i) {
+            ((SGNodeListener)this.nodeListeners.get(i)).transformedBoundsChanged(this);
+         }
+      }
+
+   }
+
+   public final void addKeyListener(SGKeyListener listener) {
+      if (listener == null) {
+         throw new IllegalArgumentException("null listener");
+      } else {
+         if (this.keyListeners == Collections.EMPTY_LIST) {
+            this.keyListeners = new ArrayList(1);
+         }
+
+         this.keyListeners.add(listener);
+      }
+   }
+
+   public final void removeKeyListener(SGKeyListener listener) {
+      if (listener == null) {
+         throw new IllegalArgumentException("null listener");
+      } else {
+         this.keyListeners.remove(listener);
+      }
+   }
+
+   public final void addFocusListener(SGFocusListener listener) {
+      if (listener == null) {
+         throw new IllegalArgumentException("null listener");
+      } else {
+         if (this.focusListeners == Collections.EMPTY_LIST) {
+            this.focusListeners = new ArrayList(1);
+         }
+
+         this.focusListeners.add(listener);
+      }
+   }
+
+   public final void removeFocusListener(SGFocusListener listener) {
+      if (listener == null) {
+         throw new IllegalArgumentException("null listener");
+      } else {
+         this.focusListeners.remove(listener);
+      }
+   }
+
+   final void processKeyEvent(KeyEvent e) {
+      int evid = e.getID();
+      Iterator i$ = this.keyListeners.iterator();
+
+      while(i$.hasNext()) {
+         SGKeyListener listener = (SGKeyListener)i$.next();
+         switch (evid) {
+            case 400:
+               listener.keyTyped(e, this);
+               break;
+            case 401:
+               listener.keyPressed(e, this);
+               break;
+            case 402:
+               listener.keyReleased(e, this);
+         }
+      }
+
+   }
+
+   final void processFocusEvent(FocusEvent e) {
+      int evid = e.getID();
+      Iterator i$ = this.focusListeners.iterator();
+
+      while(i$.hasNext()) {
+         SGFocusListener listener = (SGFocusListener)i$.next();
+         switch (evid) {
+            case 1004:
+               listener.focusGained(e, this);
+               break;
+            case 1005:
+               listener.focusLost(e, this);
+         }
+      }
+
+   }
+
+   boolean isFocusable() {
+      return this.isVisible() && this.isFocusEnabled() && !this.keyListeners.isEmpty();
+   }
+
+   public final void requestFocus() {
+      FocusHandler.requestFocus(this);
+   }
+
+   public final void setCursor(Cursor cursor) {
+      this.cursor = cursor;
+      this.updateCursor();
+   }
+
+   public final Cursor getCursor() {
+      return this.cursor;
+   }
+
+   void updateCursor() {
+      JSGPanel panel = this.getPanel();
+      if (panel != null) {
+         panel.updateCursor();
+      }
+
+   }
+
+   boolean hasOverlappingContents() {
+      return true;
+   }
 }

@@ -1,248 +1,333 @@
-/*
- * Copyright 2007 Sun Microsystems, Inc.  All Rights Reserved.
- * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
- *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
- *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
- *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
- */
-
 package com.sun.scenario.scenegraph;
 
+import com.sun.scenario.utils.Utils;
+import java.awt.AlphaComposite;
+import java.awt.EventQueue;
 import java.awt.Graphics2D;
 import java.awt.Image;
 import java.awt.RenderingHints;
 import java.awt.geom.AffineTransform;
+import java.awt.geom.Dimension2D;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
+import java.awt.image.BufferedImage;
 import java.awt.image.ImageObserver;
+import java.awt.image.VolatileImage;
 
-/**
- * A scene graph node that renders an Image.
- * 
- * @author Chet Haase
- * @author Hans Muller
- */
 public class SGImage extends SGLeaf {
-    private Image image;
-    private final Point2D.Float location = new Point2D.Float();
-    private Object interpolationHint = RenderingHints.VALUE_INTERPOLATION_BILINEAR;
-    private boolean smoothTranslation = false;
-    private final ImageObserver observer = new SGImageObserver();
+   private Image image;
+   private final Rectangle2D.Float dimension = new Rectangle2D.Float();
+   private Rectangle2D.Float viewport = new Rectangle2D.Float();
+   private Rectangle2D userViewport = null;
+   private Object interpolationHint;
+   private boolean smoothTranslation;
+   private final ImageObserver observer;
+   private boolean imageOpaque;
+   private static BufferedImage hitBI;
 
-    public final Image getImage() { 
-        return image;
-    }
+   public SGImage() {
+      this.interpolationHint = Utils.isAtLeastJava6 ? RenderingHints.VALUE_INTERPOLATION_BILINEAR : RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR;
+      this.smoothTranslation = false;
+      this.observer = new SGImageObserver();
+   }
 
-    public void setImage(Image image) {
-        boolean boundsChanged;
-        if (this.image != null && image != null) {
-            boundsChanged =
-                (image.getWidth(null) != this.image.getWidth(null)) ||
-                (image.getHeight(null) != this.image.getHeight(null));
-        } else {
-            boundsChanged = true;
-        }
-        this.image = image;
-        repaint(boundsChanged);
-    }
+   public final Image getImage() {
+      return this.image;
+   }
 
-    /**
-     * Defines the image's bound's origin.  Assuming the transform is null,
-     * this is the location in the parent node where the image will be drawn.
-     * If return value {@code rv} is non-null, it will be set and returned.
-     * Otherwise a new Point will be allocated and returned.
-     * 
-     * @param rv the return value or null
-     * @return the location where the image will be drawn
-     */
-    public final Point2D getLocation(Point2D rv) { 
-        if (rv == null) {
-            rv = new Point2D.Float();
-        }
-        rv.setLocation(location);
-        return rv;
-    }
+   public void setImage(Image image) {
+      boolean boundsChanged;
+      if (this.image != null && image != null) {
+         boundsChanged = image.getWidth((ImageObserver)null) != this.image.getWidth((ImageObserver)null) || image.getHeight((ImageObserver)null) != this.image.getHeight((ImageObserver)null);
+      } else {
+         boundsChanged = true;
+      }
 
-    /**
-     * This no-arg getter is equivalent to calling <code>getLocation(null)
-     * </code>.
-     *
-     * @return the location where the text will be drawn
-     * @see #getLocation(Point2D)
-     */
-    public final Point2D getLocation() {
-        return getLocation(null);
-    }
+      this.image = image;
+      if (this.userViewport == null) {
+         if (this.image != null) {
+            this.viewport.width = (float)this.image.getWidth((ImageObserver)null);
+            this.viewport.height = (float)this.image.getHeight((ImageObserver)null);
+         } else {
+            this.viewport.width = 0.0F;
+            this.viewport.height = 0.0F;
+         }
+      }
 
-    public void setLocation(Point2D location) {
-        if (location == null) {
-            throw new IllegalArgumentException("null location");
-        }
-        this.location.setLocation(location);
-        repaint(true);
-    }
+      if (image instanceof BufferedImage) {
+         this.imageOpaque = !((BufferedImage)image).getColorModel().hasAlpha();
+      } else if (image instanceof VolatileImage) {
+         this.imageOpaque = ((VolatileImage)image).getTransparency() == 1;
+      } else {
+         this.imageOpaque = false;
+      }
 
-    /**
-     * Returns the {@code KEY_INTERPOLATION} rendering hint.
-     * The {@code hint} will be
-     * one of: {@code RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR}, 
-     * {@code RenderingHints.VALUE_INTERPOLATION_BILINEAR}, 
-     * {@code RenderingHints.VALUE_INTERPOLATION_BICUBIC}.
-     * 
-     * @return the {@code KEY_INTERPOLATION} hint
-     * @see java.awt.RenderingHints
-     */
-    public final Object getInterpolationHint() {
-        return interpolationHint;
-    }
+      this.repaint(boundsChanged);
+   }
 
-    /**
-     * Sets the {@code KEY_INTERPOLATION} rendering hint. The {@code hint} must be
-     * one of: {@code RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR}, 
-     * {@code RenderingHints.VALUE_INTERPOLATION_BILINEAR}, 
-     * {@code RenderingHints.VALUE_INTERPOLATION_BICUBIC}.
-     * The default is {@code VALUE_INTERPOLATION_BILINEAR}.
-     * 
-     * @see java.awt.RenderingHints
-     * @see java.awt.Graphics2D
-     */
-    public void setInterpolationHint(Object hint) {
-        if (!RenderingHints.KEY_INTERPOLATION.isCompatibleValue(hint)) {
-            // Note that KEY_INTERPOLATION.isCompatibleValue also rejects null
-            throw new IllegalArgumentException("invalid hint");
-        }
-        interpolationHint = hint;
-        repaint(false);
-    }
-    
-    /**
-     * Returns whether the interpolation hint will be honored for
-     * non-integral translations.
-     * 
-     * @return true if the interpolation hint should be honored for
-     * non-integral translations; false otherwise
-     */
-    public final boolean getSmoothTranslation() {
-        return smoothTranslation;
-    }
-    
-    /**
-     * Sets whether the interpolation hint will be honored for
-     * non-integral translations.  The default is false.  Setting
-     * this to true may improve visual quality of non-integral translations,
-     * but may negatively impact performance on some systems.
-     * <p>
-     * This setting only has an impact if the current interpolation hint
-     * is either
-     * {@code RenderingHints.VALUE_INTERPOLATION_BILINEAR} or
-     * {@code RenderingHints.VALUE_INTERPOLATION_BICUBIC}.
-     * 
-     * @param smooth if true, the interpolation hint will be honored
-     * for non-integral translations
-     */
-    public void setSmoothTranslation(boolean smooth) {
-        this.smoothTranslation = smooth;
-        repaint(false);
-    }
+   public final Point2D getLocation(Point2D rv) {
+      if (rv == null) {
+         rv = new Point2D.Float();
+      }
 
-    @Override
-    public void paint(Graphics2D g) {
-        if (image != null) {
-            g.translate(location.getX(), location.getY());
-            Object hint = interpolationHint;
-            if (!smoothTranslation &&
-                hint != RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR)
-            {
-                // Workaround for JDK bug 6570870: force NEAREST_NEIGHBOR
-                // for non-integral translations to avoid slow paths
-                AffineTransform xform = g.getTransform();
-                if (xform.isIdentity() ||
-                    xform.getType() == AffineTransform.TYPE_TRANSLATION)
-                {
-                    hint = RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR;
-                }
+      ((Point2D)rv).setLocation(this.dimension.getX(), this.dimension.getY());
+      return (Point2D)rv;
+   }
+
+   public final Point2D getLocation() {
+      return this.getLocation((Point2D)null);
+   }
+
+   public void setLocation(Point2D location) {
+      if (location == null) {
+         throw new IllegalArgumentException("null location");
+      } else {
+         float newx = (float)location.getX();
+         float newy = (float)location.getY();
+         if (this.dimension.x != newx || this.dimension.y != newy) {
+            this.dimension.x = newx;
+            this.dimension.y = newy;
+            this.repaint(true);
+         }
+
+      }
+   }
+
+   public void setDimensions(Dimension2D dimension) {
+      if (dimension != null && !(dimension.getWidth() <= 0.0) && !(dimension.getHeight() <= 0.0)) {
+         float neww = (float)dimension.getWidth();
+         float newh = (float)dimension.getHeight();
+         if (this.dimension.width != neww || this.dimension.height != newh) {
+            this.dimension.width = neww;
+            this.dimension.height = newh;
+            this.repaint(true);
+         }
+
+      } else {
+         throw new IllegalArgumentException("null or empty dimensions");
+      }
+   }
+
+   public final Object getInterpolationHint() {
+      return this.interpolationHint;
+   }
+
+   public void setInterpolationHint(Object hint) {
+      if (!RenderingHints.KEY_INTERPOLATION.isCompatibleValue(hint)) {
+         throw new IllegalArgumentException("invalid hint");
+      } else {
+         if (this.interpolationHint != hint) {
+            this.interpolationHint = hint;
+            this.repaint(false);
+         }
+
+      }
+   }
+
+   public final boolean getSmoothTranslation() {
+      return this.smoothTranslation;
+   }
+
+   public void setSmoothTranslation(boolean smooth) {
+      if (this.smoothTranslation != smooth) {
+         this.smoothTranslation = smooth;
+         this.repaint(false);
+      }
+
+   }
+
+   public void setViewport(Rectangle2D newUserViewport) {
+      if (newUserViewport != null) {
+         this.userViewport = newUserViewport;
+         this.viewport.x = (float)newUserViewport.getX();
+         this.viewport.y = (float)newUserViewport.getY();
+         this.viewport.width = (float)newUserViewport.getWidth();
+         this.viewport.height = (float)newUserViewport.getHeight();
+      } else {
+         this.userViewport = null;
+         this.viewport.x = 0.0F;
+         this.viewport.y = 0.0F;
+         if (this.image != null) {
+            this.viewport.width = (float)this.image.getWidth((ImageObserver)null);
+            this.viewport.height = (float)this.image.getHeight((ImageObserver)null);
+         } else {
+            this.viewport.width = 0.0F;
+            this.viewport.height = 0.0F;
+         }
+      }
+
+      this.repaint(true);
+   }
+
+   public Rectangle2D getViewport() {
+      return this.userViewport;
+   }
+
+   public void paint(Graphics2D g) {
+      if (this.image != null) {
+         double x = this.dimension.getX();
+         double y = this.dimension.getY();
+         double iw = (double)this.viewport.width;
+         double ih = (double)this.viewport.height;
+         boolean dimensionsSet = this.dimension.getWidth() > 0.0 && this.dimension.getHeight() > 0.0;
+         boolean doScale = dimensionsSet && (iw != this.dimension.getWidth() || ih != this.dimension.getHeight());
+         g = (Graphics2D)g.create();
+         g.translate(x, y);
+         if (doScale && iw != 0.0 && ih != 0.0) {
+            double scaleW = this.dimension.getWidth() / iw;
+            double scaleH = this.dimension.getHeight() / ih;
+            g.scale(scaleW, scaleH);
+         }
+
+         Object hint = this.interpolationHint;
+         if (!this.smoothTranslation && hint != RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR) {
+            AffineTransform xform = g.getTransform();
+            if (xform.isIdentity() || xform.getType() == 1) {
+               hint = RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR;
             }
-            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, hint);
-            if (DO_PAINT) {
-                g.drawImage(image, 0, 0, observer);
-            }
-        }
-    }
+         }
 
-    private class SGImageObserver implements ImageObserver {
-        public boolean imageUpdate(Image img, int infoflags,
-                                   int x, int y, int w, int h)
-        {
-            boolean ret = false;
-            if (img == image && isVisible()) {
-                if ((infoflags & (FRAMEBITS | ALLBITS | SOMEBITS)) != 0) {
-                    markDirty(false);
-                }
-                ret = (infoflags & (ALLBITS | ABORT | ERROR)) == 0;
-            }
-            return ret;
-        }
-    }
+         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, hint);
+         if (DO_PAINT) {
+            g.drawImage(this.image, 0, 0, (int)this.viewport.width, (int)this.viewport.height, (int)this.viewport.x, (int)this.viewport.y, (int)(this.viewport.x + this.viewport.width), (int)(this.viewport.y + this.viewport.height), (ImageObserver)null);
+         }
+      }
 
-    @Override
-    public final Rectangle2D getBounds(AffineTransform transform) {
-        if (image == null) {
-            return new Rectangle2D.Float();
-        }
-        float x = location.x;
-        float y = location.y;
-        float w = image.getWidth(null);
-        float h = image.getHeight(null);
-        if (transform != null && !transform.isIdentity()) {
-            if (transform.getShearX() == 0 && transform.getShearY() == 0) {
-                // No rotations...
-                if (transform.getScaleX() == 1 && transform.getScaleY() == 1) {
-                    // just a translation...
-                    x += transform.getTranslateX();
-                    y += transform.getTranslateY();
-                } else {
-                    float coords[] = { x, y, x+w, y+h };
-                    transform.transform(coords, 0, coords, 0, 2);
-                    x = Math.min(coords[0], coords[2]);
-                    y = Math.min(coords[1], coords[3]);
-                    w = Math.max(coords[0], coords[2]) - x;
-                    h = Math.max(coords[1], coords[3]) - y;
-                }
+   }
+
+   public final Rectangle2D getBounds(AffineTransform transform) {
+      if (this.image == null) {
+         return new Rectangle2D.Float();
+      } else {
+         float x = this.dimension.x;
+         float y = this.dimension.y;
+         boolean dimensionsSet = this.dimension.getWidth() > 0.0 && this.dimension.getHeight() > 0.0;
+         float w = dimensionsSet ? this.dimension.width : this.viewport.width;
+         float h = dimensionsSet ? this.dimension.height : this.viewport.height;
+         if (transform != null && !transform.isIdentity()) {
+            float[] coords;
+            if (transform.getShearX() == 0.0 && transform.getShearY() == 0.0) {
+               if (transform.getScaleX() == 1.0 && transform.getScaleY() == 1.0) {
+                  x = (float)((double)x + transform.getTranslateX());
+                  y = (float)((double)y + transform.getTranslateY());
+               } else {
+                  coords = new float[]{x, y, x + w, y + h};
+                  transform.transform(coords, 0, coords, 0, 2);
+                  x = Math.min(coords[0], coords[2]);
+                  y = Math.min(coords[1], coords[3]);
+                  w = Math.max(coords[0], coords[2]) - x;
+                  h = Math.max(coords[1], coords[3]) - y;
+               }
             } else {
-                float coords[] = { x, y, x+w, y, x, y+h, x+w, y+h };
-                transform.transform(coords, 0, coords, 0, 4);
-                x = w = coords[0];
-                y = h = coords[1];
-                for (int i = 2; i < coords.length; i += 2) {
-                    if (x > coords[i]) x = coords[i];
-                    if (w < coords[i]) w = coords[i];
-                    if (y > coords[i+1]) y = coords[i+1];
-                    if (h < coords[i+1]) h = coords[i+1];
-                }
-                w -= x;
-                h -= y;
-            }
-        }
-        return new Rectangle2D.Float(x, y, w, h);
-    }
+               coords = new float[]{x, y, x + w, y, x, y + h, x + w, y + h};
+               transform.transform(coords, 0, coords, 0, 4);
+               x = w = coords[0];
+               y = h = coords[1];
 
-    @Override
-    public boolean hasOverlappingContents() {
-        return false;
-    }
+               for(int i = 2; i < coords.length; i += 2) {
+                  if (x > coords[i]) {
+                     x = coords[i];
+                  }
+
+                  if (w < coords[i]) {
+                     w = coords[i];
+                  }
+
+                  if (y > coords[i + 1]) {
+                     y = coords[i + 1];
+                  }
+
+                  if (h < coords[i + 1]) {
+                     h = coords[i + 1];
+                  }
+               }
+
+               w -= x;
+               h -= y;
+            }
+         }
+
+         return new Rectangle2D.Float(x, y, w, h);
+      }
+   }
+
+   private boolean imageContains(double dx, double dy) {
+      boolean dimensionsSet = this.dimension.width > 0.0F && this.dimension.height > 0.0F;
+      float destW = dimensionsSet ? this.dimension.width : this.viewport.width;
+      float destH = dimensionsSet ? this.dimension.height : this.viewport.height;
+      dx = (double)this.viewport.x + dx * (double)this.viewport.width / (double)destW;
+      dy = (double)this.viewport.y + dy * (double)this.viewport.height / (double)destH;
+      if (!(dx < 0.0) && !(dy < 0.0) && !(dx >= (double)this.image.getWidth((ImageObserver)null)) && !(dy >= (double)this.image.getHeight((ImageObserver)null))) {
+         if (this.imageOpaque) {
+            return true;
+         } else {
+            int x = (int)dx;
+            int y = (int)dy;
+            BufferedImage bi;
+            if (this.image instanceof BufferedImage) {
+               bi = (BufferedImage)this.image;
+            } else {
+               if (hitBI == null) {
+                  hitBI = new BufferedImage(1, 1, 2);
+               }
+
+               bi = hitBI;
+               Graphics2D g = bi.createGraphics();
+               g.setComposite(AlphaComposite.Src);
+               g.drawImage(this.image, -x, -y, (ImageObserver)null);
+               if (this.image instanceof VolatileImage) {
+                  VolatileImage vi = (VolatileImage)this.image;
+                  if (vi.contentsLost()) {
+                     return false;
+                  }
+               }
+
+               x = 0;
+               y = 0;
+            }
+
+            return (bi.getRGB(x, y) >> 24 & 255) > 0;
+         }
+      } else {
+         return false;
+      }
+   }
+
+   public boolean contains(Point2D point) {
+      if (this.image != null && point != null) {
+         Rectangle2D b = this.getBounds();
+         return b.contains(point) ? this.imageContains(point.getX() - b.getX(), point.getY() - b.getY()) : false;
+      } else {
+         return false;
+      }
+   }
+
+   public boolean hasOverlappingContents() {
+      return false;
+   }
+
+   private class SGImageObserver implements ImageObserver {
+      private final Runnable markDirtyRunnable;
+
+      private SGImageObserver() {
+         this.markDirtyRunnable = new Runnable() {
+            public void run() {
+               SGImage.this.visualChanged();
+            }
+         };
+      }
+
+      public boolean imageUpdate(Image img, int infoflags, int x, int y, int w, int h) {
+         boolean ret = false;
+         if (img == SGImage.this.image && SGImage.this.isVisible()) {
+            if ((infoflags & 56) != 0) {
+               EventQueue.invokeLater(this.markDirtyRunnable);
+            }
+
+            ret = (infoflags & 224) == 0;
+         }
+
+         return ret;
+      }
+   }
 }

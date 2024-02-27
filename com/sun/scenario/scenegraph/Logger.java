@@ -1,26 +1,3 @@
-/*
- * Copyright 2007 Sun Microsystems, Inc.  All Rights Reserved.
- * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
- *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
- *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
- *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
- */
-
 package com.sun.scenario.scenegraph;
 
 import java.io.PrintStream;
@@ -28,137 +5,150 @@ import java.lang.reflect.Constructor;
 import java.util.HashMap;
 import java.util.Map;
 
-
-/* A Logger class for mobile platforms that don't provide
- * the java.util.logging API.
- */
 abstract class Logger {
-    public enum Level {MESSAGE, WARNING, ERROR};
-    private static final Map<String, Logger> loggerMap = new HashMap<String, Logger>();
-    private static Constructor loggerCtor = null;
+   private static final Map<String, Logger> loggerMap = new HashMap();
+   private static Constructor loggerCtor = null;
 
-    private static Logger createLogger(String name) {
-
-        try {
-            if (loggerCtor != null) {
-                return (Logger)loggerCtor.newInstance(name);
-            } else {
-                try {
-                    loggerCtor = UtilLogger.class.getConstructor(String.class);
-                    return (Logger)loggerCtor.newInstance(name);
-                }
-                catch (Exception e) {
-                    loggerCtor = DefaultLogger.class.getConstructor(String.class);
-                    return (Logger)loggerCtor.newInstance(name);
-                }
+   private static Logger createLogger(String name) {
+      try {
+         if (loggerCtor != null) {
+            return (Logger)loggerCtor.newInstance(name);
+         } else {
+            try {
+               loggerCtor = UtilLogger.class.getConstructor(String.class);
+               return (Logger)loggerCtor.newInstance(name);
+            } catch (Exception var2) {
+               loggerCtor = DefaultLogger.class.getConstructor(String.class);
+               return (Logger)loggerCtor.newInstance(name);
             }
-        }
-        catch(Exception e) {
-            throw new Error(e);
-        }
-    }
+         }
+      } catch (Exception var3) {
+         throw new Error(var3);
+      }
+   }
 
-    public static synchronized Logger getLogger(String name) {
-        Logger logger = loggerMap.get(name);
-        if (logger == null) {
-            logger = createLogger(name);
-            loggerMap.put(name, logger);
-        }
-        return logger;
-    }
+   public static synchronized Logger getLogger(String name) {
+      Logger logger = (Logger)loggerMap.get(name);
+      if (logger == null) {
+         logger = createLogger(name);
+         loggerMap.put(name, logger);
+      }
 
-    public abstract boolean isEnabled(Level l); 
-    public abstract void setEnabled(Level l); 
-    public abstract void message(String format, Object... args);
-    public abstract void warning(Exception e, String format, Object... args);
-    public abstract void error(Exception e, String format, Object... args);
+      return logger;
+   }
 
-    public final void warning(String format, Object... args) {
-        warning(null, format, args);
-    }
+   public abstract boolean isEnabled(Level var1);
 
-    public final void error(String format, Object... args) {
-        error(null, format, args);
-    }
+   public abstract void setEnabled(Level var1);
 
+   public abstract void message(String var1, Object... var2);
 
-    private static class DefaultLogger extends Logger {
-        private Level level = Level.WARNING;
+   public abstract void warning(Exception var1, String var2, Object... var3);
 
-        public final boolean isEnabled(Level l) {
-            return l.compareTo(level) >= 0;
-        }
+   public abstract void error(Exception var1, String var2, Object... var3);
 
-        public final void setEnabled(Level l) { 
-            level = l; 
-        }
-        
-        public DefaultLogger(String name) { }
+   public final void warning(String format, Object... args) {
+      this.warning((Exception)null, format, args);
+   }
 
-        private void log(Level l, PrintStream p, Exception e, String format, Object[] args) {
-            if (l.compareTo(level) >= 0) {
-                if (e != null) {
-                    e.printStackTrace(p);
-                }
-                // p.println(String.format(format, args)); No String#format or
-                // PrintStream#format on FX Mobile, CDC
-                p.print(format);
-                for(Object a : args) { p.print(" " + a); }
-                p.println();
+   public final void error(String format, Object... args) {
+      this.error((Exception)null, format, args);
+   }
+
+   private static class UtilLogger extends Logger {
+      private final java.util.logging.Logger logger;
+
+      public UtilLogger(String name) {
+         this.logger = java.util.logging.Logger.getLogger(name);
+      }
+
+      private java.util.logging.Level convertLevel(Level l) {
+         switch (l) {
+            case ERROR:
+               return java.util.logging.Level.SEVERE;
+            case WARNING:
+               return java.util.logging.Level.WARNING;
+            default:
+               return java.util.logging.Level.ALL;
+         }
+      }
+
+      public final boolean isEnabled(Level l) {
+         return this.logger.isLoggable(this.convertLevel(l));
+      }
+
+      public final void setEnabled(Level l) {
+         this.logger.setLevel(this.convertLevel(l));
+      }
+
+      private void log(java.util.logging.Level l, Exception e, String format, Object[] args) {
+         this.logger.log(l, String.format(format, args), e);
+      }
+
+      public void message(String format, Object... args) {
+         this.log(java.util.logging.Level.INFO, (Exception)null, format, args);
+      }
+
+      public void warning(Exception e, String format, Object... args) {
+         this.log(java.util.logging.Level.WARNING, (Exception)null, format, args);
+      }
+
+      public void error(Exception e, String format, Object... args) {
+         this.log(java.util.logging.Level.SEVERE, (Exception)null, format, args);
+      }
+   }
+
+   private static class DefaultLogger extends Logger {
+      private Level level;
+
+      public final boolean isEnabled(Level l) {
+         return l.compareTo(this.level) >= 0;
+      }
+
+      public final void setEnabled(Level l) {
+         this.level = l;
+      }
+
+      public DefaultLogger(String name) {
+         this.level = Logger.Level.WARNING;
+      }
+
+      private void log(Level l, PrintStream p, Exception e, String format, Object[] args) {
+         if (l.compareTo(this.level) >= 0) {
+            if (e != null) {
+               e.printStackTrace(p);
             }
-        }
 
-        public final void message(String format, Object... args) {
-            log(Level.MESSAGE, System.out, null, format, args); 
-        }
+            p.print(format);
+            Object[] arr$ = args;
+            int len$ = args.length;
 
-        public final void warning(Exception e, String format, Object... args) {
-            log(Level.WARNING, System.err, e, format, args); 
-        }
-
-        public final void error(Exception e, String format, Object... args) {
-            log(Level.ERROR, System.err, e, format, args); 
-        }
-    }
-
-
-    private static class UtilLogger extends Logger {
-        private final java.util.logging.Logger logger;
-
-        public UtilLogger(String name) { 
-            logger = java.util.logging.Logger.getLogger(name);
-        }
-        
-        private java.util.logging.Level convertLevel(Level l) {
-            switch(l) {
-            case ERROR: return java.util.logging.Level.SEVERE;
-            case WARNING: return java.util.logging.Level.WARNING;
-            default: return java.util.logging.Level.ALL;
+            for(int i$ = 0; i$ < len$; ++i$) {
+               Object a = arr$[i$];
+               p.print(" " + a);
             }
-        }
 
-        public final boolean isEnabled(Level l) {
-            return logger.isLoggable(convertLevel(l));
-        }
+            p.println();
+         }
 
-        public final void setEnabled(Level l) { 
-            logger.setLevel(convertLevel(l));
-        }
+      }
 
-        private void log(java.util.logging.Level l, Exception e, String format, Object[] args) {
-            logger.log(l, String.format(format, args), e);
-        }
+      public final void message(String format, Object... args) {
+         this.log(Logger.Level.MESSAGE, System.out, (Exception)null, format, args);
+      }
 
-        public void message(String format, Object... args) {
-            log(java.util.logging.Level.INFO, null, format, args);
-        }
+      public final void warning(Exception e, String format, Object... args) {
+         this.log(Logger.Level.WARNING, System.err, e, format, args);
+      }
 
-        public void warning(Exception e, String format, Object... args) {
-            log(java.util.logging.Level.WARNING, null, format, args);
-        }
+      public final void error(Exception e, String format, Object... args) {
+         this.log(Logger.Level.ERROR, System.err, e, format, args);
+      }
+   }
 
-        public void error(Exception e, String format, Object... args) {
-            log(java.util.logging.Level.SEVERE, null, format, args);
-        }
-    }
+   public static enum Level {
+      MESSAGE,
+      WARNING,
+      ERROR;
+   }
 }

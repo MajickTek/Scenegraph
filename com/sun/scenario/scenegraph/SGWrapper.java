@@ -1,70 +1,107 @@
-/*
- * Copyright 2007 Sun Microsystems, Inc.  All Rights Reserved.
- * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
- *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
- *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
- *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
- */
-
 package com.sun.scenario.scenegraph;
 
+import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.geom.AffineTransform;
+import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * Base class for nodes that maintain an internal graph of nodes.
- * 
- * @author Chris Campbell
- */
 public abstract class SGWrapper extends SGParent {
+   private SGNode rootNode;
+   private List<SGNode> singletonList;
 
-    private List<SGNode> singletonList;
-    
-    protected abstract SGNode getRoot();
-    
-    protected void initParent() {
-        // TODO: this is a hack; we could just make it the responsibility
-        // of the subclass to do this, but SGNode.setParent() is package-private
-        getRoot().setParent(this);
-        markDirty(true);
-    }
-    
-    public List<SGNode> getChildren() {
-        SGNode root = getRoot();
-        if (root == null) {
-            return Collections.emptyList();
-        } else {
-            if (singletonList == null || singletonList.get(0) != root) {
-                singletonList = Collections.singletonList(root);
+   protected void setRoot(SGNode newroot) {
+      if (newroot == null) {
+         throw new IllegalArgumentException("null child");
+      } else {
+         if (this.rootNode != newroot) {
+            this.singletonList = null;
+            SGNode r = this.rootNode;
+            if (r != null) {
+               r.visualChanged();
+               this.addDirtyRegion(r.getTransformedBounds(), false);
+               r.dispatchAllPendingEvents();
             }
-            return singletonList;
-        }
-    }
-    
-    @Override
-    public Rectangle2D getBounds(AffineTransform transform) {
-        return getRoot().getBounds(transform);
-    }
 
-    @Override
-    boolean hasOverlappingContents() {
-        return getRoot().hasOverlappingContents();
-    }
+            this.rootNode = newroot;
+            newroot.setParent(this);
+            this.boundsChanged();
+            this.dispatchAllPendingEvents();
+            this.updateCursor();
+         }
+
+      }
+   }
+
+   public SGNode getChild() {
+      return this.rootNode;
+   }
+
+   public List<SGNode> getChildren() {
+      if (this.rootNode == null) {
+         return Collections.emptyList();
+      } else {
+         if (this.singletonList == null) {
+            this.singletonList = Collections.singletonList(this.rootNode);
+         }
+
+         return this.singletonList;
+      }
+   }
+
+   final void doTransformChanged() {
+      super.doTransformChanged();
+      if (this.rootNode != null) {
+         this.rootNode.transformChanged();
+      }
+
+   }
+
+   void dispatchPendingEvents() {
+      super.dispatchPendingEvents();
+      if (this.rootNode != null) {
+         this.rootNode.dispatchPendingEvents();
+      }
+
+   }
+
+   Rectangle2D accumulateDirtyChildren(Rectangle2D r, Rectangle2D clip) {
+      if (this.rootNode != null) {
+         r = this.rootNode.accumulateDirty(r, clip);
+      }
+
+      return r;
+   }
+
+   void render(Graphics2D g, Rectangle dirtyRegion, boolean clearDirty) {
+      if (!this.isVisible()) {
+         if (clearDirty) {
+            this.clearDirty();
+         }
+
+      } else {
+         if (this.rootNode != null) {
+            this.rootNode.render(g, dirtyRegion, clearDirty);
+         }
+
+         if (clearDirty) {
+            this.clearDirty();
+         }
+
+      }
+   }
+
+   public boolean contains(Point2D point) {
+      return this.rootNode != null ? this.rootNode.contains(point) : super.contains(point);
+   }
+
+   public Rectangle2D getBounds(AffineTransform transform) {
+      return (Rectangle2D)(this.rootNode == null ? new Rectangle2D.Float() : this.rootNode.getBounds(transform));
+   }
+
+   boolean hasOverlappingContents() {
+      return this.rootNode == null ? false : this.rootNode.hasOverlappingContents();
+   }
 }

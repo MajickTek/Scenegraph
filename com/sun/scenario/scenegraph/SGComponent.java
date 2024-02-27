@@ -1,363 +1,178 @@
-/*
- * Copyright 2007 Sun Microsystems, Inc.  All Rights Reserved.
- * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
- *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
- *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
- *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
- */
-
 package com.sun.scenario.scenegraph;
 
-import java.awt.AWTEvent;
-import java.awt.BorderLayout;
+import com.sun.embeddedswing.EmbeddedPeer;
 import java.awt.Component;
-import java.awt.Container;
 import java.awt.Dimension;
-import java.awt.Graphics;
+import java.awt.EventQueue;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
-import java.awt.event.FocusEvent;
+import java.awt.Shape;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Rectangle2D;
-import java.util.HashMap;
-import java.util.Map;
-
 import javax.swing.JComponent;
-import javax.swing.JPanel;
-import javax.swing.SwingUtilities;
 
-import com.sun.scenario.scenegraph.Logger.Level;
-
-/**
- * A scene graph node that renders a Swing component.
- * 
- * @author Chet Haase
- * @author Hans Muller
- * @author Igor Kushnirskiy
- */
 public class SGComponent extends SGLeaf {
-    private static final Logger logger = 
-        Logger.getLogger(SGComponent.class.getName());
-    private static final Logger focusLogger = 
-        Logger.getLogger(SGComponent.class.getName());
-    private static final boolean havePrinterGraphics; 
-    static {
-        boolean tmpBoolean = false;
-        try {
-            Class.forName("java.awt.print.PrinterGraphics");
-            tmpBoolean = true;
-        } catch (ClassNotFoundException ignore) {
-        }
-        havePrinterGraphics = tmpBoolean;
-    }
-    private Component component;
-    private final SGShell shell;
-    private JPanel container = null;
-    private Dimension size = null;
-   
-    public SGComponent() {
-        shell = new SGShell();
-    }
-    
-    public final Component getComponent() { 
-        return component;
-    }
+   private static final Logger logger = Logger.getLogger(SGComponent.class.getName());
+   private static final Logger focusLogger = Logger.getLogger(SGComponent.class.getName());
+   private SGEmbeddedPeer embeddedPeer = null;
+   private Dimension size = null;
 
-    JPanel getContainer() {
-        return container;
-    }
-    
-    private void checkContainer() {
-        if (container == null) {
-            container = new JPanel(null) {
-                private static final long serialVersionUID = 1L;
+   public final Component getComponent() {
+      return this.embeddedPeer == null ? null : this.embeddedPeer.getEmbeddedComponent();
+   }
 
-                @Override
-                public boolean contains(int x, int y) {
-                    if (getComponentCount() > 0) {
-                        return getComponent(0).contains(x, y);
-                    } else {
-                        return super.contains(x,y);
-                    }
-                }
-            };
-            container.setBounds(0, 0, 0, 0);
-        }
-        if (container.getParent() == null 
-                || container.getParent() != getPanel()) {
-            JComponent panel = getPanel();
-            if (panel != null) {
-                panel.add(container);
+   void setParent(Object parent) {
+      if (this.embeddedPeer != null && parent == null) {
+         this.embeddedPeer.setParentComponent((JComponent)null);
+      }
+
+      super.setParent(parent);
+   }
+
+   public void setComponent(Component component) {
+      if (this.embeddedPeer != null) {
+         this.embeddedPeer.dispose();
+         this.embeddedPeer = null;
+      }
+
+      if (component != null) {
+         this.embeddedPeer = (SGEmbeddedPeer)SGEmbeddedToolkit.getSGEmbeddedToolkit().embed(this.getPanel(), component, new Object[]{this});
+         this.embeddedPeer.setSize(this.getSize());
+         this.embeddedPeer.getShellPanel().setFocusCycleRoot(true);
+         this.embeddedPeer.getShellPanel().setFocusTraversalPolicy(FocusHandler.getFocusTraversalPolicy());
+      }
+
+      this.repaint(true);
+   }
+
+   public Dimension getSize() {
+      return this.size;
+   }
+
+   public void setSize(Dimension size) {
+      this.size = size;
+      if (this.embeddedPeer != null) {
+         this.embeddedPeer.setSize(size);
+         this.embeddedPeer.validate();
+      }
+
+   }
+
+   public void setSize(int width, int height) {
+      this.setSize(new Dimension(width, height));
+   }
+
+   public void paint(Graphics2D g) {
+      if (DO_PAINT) {
+         try {
+            this.embeddedPeer.paint(g);
+         } catch (NullPointerException var3) {
+            if (g.getTransform().getDeterminant() != 0.0) {
+               throw var3;
             }
-        } 
-    }
-    
-    public void setComponent(Component component) {
-        this.component = component;
-        shell.removeAll();
-        if (component != null) {
-            shell.add(component, BorderLayout.CENTER);
-            FocusHandler.addNotify(this);
-        }
-        shell.setContains(false);
-        shell.validate();
-        repaint(true);
-    }
-    
-    /**
-     * Returns the target size of this {@code SGComponent}, which may be null
-     * if it has not already been set, or if it was explicitly set to null.
-     */
-    public Dimension getSize() {
-        return size;
-    }
-    
-    /**
-     * Sets the target size of this {@code SGComponent}.  If {@code size}
-     * is null, this node will be laid out according to the preferred size
-     * of its {@code Component}.
-     */
-    public void setSize(Dimension size) {
-        this.size = size;
-        shell.validate();
-    }
-    
-    /**
-     * Sets the target size of this {@code SGComponent}.  This is
-     * equivalent to calling:
-     * <pre>
-     *     setSize(new Dimension(width, height));
-     * </pre>
-     */
-    public void setSize(int width, int height) {
-        setSize(new Dimension(width, height));
-    }
+         }
+      }
 
-    /*
-     * turns doublebuffering off for the subtree when isReset is false
-     * and restores the original states otherwise.
-     */
-    private static void resetDoubleBuffering(Component root, 
-            Map<JComponent, Boolean> oldStateMap, boolean isReset) {
-        if (root instanceof JComponent) {
-            JComponent jComponent = (JComponent) root;
-            if (isReset) {
-                Boolean oldState = oldStateMap.get(jComponent);
-                if (oldState != null) {
-                    jComponent.setDoubleBuffered(oldState);
-                }
+   }
+
+   public final Rectangle2D getBounds(AffineTransform transform) {
+      if (this.embeddedPeer == null) {
+         return new Rectangle2D.Float();
+      } else {
+         JSGPanel panel = this.getPanel();
+         if (panel != null) {
+            this.embeddedPeer.setParentComponent(panel);
+         }
+
+         this.embeddedPeer.setSizeUpdateEnabled(false);
+         this.embeddedPeer.validate();
+         this.embeddedPeer.setSizeUpdateEnabled(true);
+         Rectangle2D bounds = new Rectangle(0, 0, this.embeddedPeer.getShellPanel().getWidth(), this.embeddedPeer.getShellPanel().getHeight());
+         if (transform != null && !transform.isIdentity()) {
+            bounds = transform.createTransformedShape((Shape)bounds).getBounds2D();
+         }
+
+         return (Rectangle2D)bounds;
+      }
+   }
+
+   boolean isFocusable() {
+      return this.isVisible() && this.getComponent() != null && this.isFocusEnabled();
+   }
+
+   boolean hasOverlappingContents() {
+      return true;
+   }
+
+   SGEmbeddedPeer getEmbeddedPeer() {
+      return this.embeddedPeer;
+   }
+
+   class SGEmbeddedPeer extends EmbeddedPeer {
+      private boolean sizeUpdateEnabled = true;
+
+      SGEmbeddedPeer(JComponent parent, Component embedded) {
+         super(parent, embedded);
+      }
+
+      public void repaint(final int x, final int y, final int width, final int height) {
+         if (EventQueue.isDispatchThread()) {
+            this.repaintOnEDT(x, y, width, height);
+         } else {
+            EventQueue.invokeLater(new Runnable() {
+               public void run() {
+                  SGEmbeddedPeer.this.repaintOnEDT(x, y, width, height);
+               }
+            });
+         }
+
+      }
+
+      private void repaintOnEDT(int x, int y, int width, int height) {
+         if (SGComponent.this.getComponent() == null) {
+            SGComponent.this.repaint(false);
+         } else {
+            int compw = SGComponent.this.getComponent().getWidth();
+            int comph = SGComponent.this.getComponent().getHeight();
+            int x0 = Math.max(x, 0);
+            int y0 = Math.max(y, 0);
+            int x1 = Math.min(x + width, compw);
+            int y1 = Math.min(y + height, comph);
+            if (x0 == 0 && y0 == 0 && x1 == compw && y1 == comph) {
+               SGComponent.this.repaint(false);
+            } else if (x1 > x0 && y1 > y0) {
+               Rectangle2D rectangle = new Rectangle2D.Float((float)x0, (float)y0, (float)(x1 - x0), (float)(y1 - y0));
+               SGComponent.this.repaint(rectangle);
+            }
+
+         }
+      }
+
+      void setSizeUpdateEnabled(boolean isEnabled) {
+         this.sizeUpdateEnabled = isEnabled;
+      }
+
+      protected void sizeChanged(Dimension oldSize, Dimension newSize) {
+         if (this.sizeUpdateEnabled) {
+            if (EventQueue.isDispatchThread()) {
+               SGComponent.this.repaint(true);
             } else {
-                oldStateMap.put(jComponent, jComponent.isDoubleBuffered());
-                jComponent.setDoubleBuffered(false);
+               EventQueue.invokeLater(new Runnable() {
+                  public void run() {
+                     SGComponent.this.repaint(true);
+                  }
+               });
             }
-        }
-        if (root instanceof Container) {
-            Container container = (Container) root;
-            for (int i = container.getComponentCount() - 1; i >= 0; i--) {
-                resetDoubleBuffering(container.getComponent(i), oldStateMap, isReset);
-            }
-        }
-    }
-    @Override
-    public void paint(Graphics2D g) {
-        if (component != null) {
-            checkContainer();
-            Graphics2D g2d = g;
-            boolean needsDispose = false;
-            if (havePrinterGraphics) {
-                /*
-                 * in case graphics has non trivial transform use
-                 * SGComponentGraphics2D
-                 */
-                AffineTransform transform = g.getTransform();
-                if (transform.getScaleX() != 1
-                        || transform.getScaleY() != 1
-                        || transform.getShearX() != 0
-                        || transform.getShearY() != 0 ) {
-                    //TODO idk: SGComponentGraphics2D can be reused
-                    g2d = SGComponentsGraphicsFactory.createGraphics(g.create());
-                    needsDispose = true;
-                }
-            }
-            Map<JComponent, Boolean> oldState = 
-                new HashMap<JComponent, Boolean>();
-            resetDoubleBuffering(shell, oldState, false);
-            if (DO_PAINT) {
-                shell.paint(g2d);
-            }
-            resetDoubleBuffering(shell, oldState, true);
-            if (needsDispose) {
-                g2d.dispose();
-            }
-        }
-    } 
-    /*
-     * this class is used so we do not try to load SGComponentGraphics class on 
-     * mobile.
-     */
-    private static class SGComponentsGraphicsFactory {
-        static Graphics2D createGraphics(Graphics g) {
-            return new SGComponentGraphics((Graphics2D) g);
-        }
-    }
 
-    @Override
-    public final Rectangle2D getBounds(AffineTransform transform) {
-        if (component == null) {
-            return new Rectangle2D.Float();
-        }
-        checkContainer();
-        if (!shell.isValid()) {
-            shell.validate();
-        }
-        Rectangle2D bounds = new Rectangle(0, 0, shell.getWidth(), shell.getHeight());
-        if (transform != null && !transform.isIdentity()) {
-            bounds = transform.createTransformedShape(bounds).getBounds2D();
-        }
-        return bounds;
-    }
-    
-    
-    @Override
-    boolean isFocusable() {
-        return super.isFocusable() || (isVisible() && getComponent() != null);
-    }
+         }
+      }
 
-    @Override
-    boolean hasOverlappingContents() {
-        // TODO: Should we check double buffering?
-        return true;
-    }
+      protected SGEmbeddedToolkit getEmbeddedToolkit() {
+         return SGEmbeddedToolkit.getSGEmbeddedToolkit();
+      }
 
-    class SGShell extends JPanel {
-        
-        private static final long serialVersionUID = 1L;
-
-        SGShell() {
-            super(new BorderLayout());
-            setOpaque(false);
-            setVisible(true);
-            setBorder(null);
-            enableEvents(AWTEvent.FOCUS_EVENT_MASK
-                    | AWTEvent.MOUSE_EVENT_MASK
-                    | AWTEvent.MOUSE_MOTION_EVENT_MASK
-                    | AWTEvent.MOUSE_WHEEL_EVENT_MASK);
-            setFocusCycleRoot(true);
-            setFocusTraversalPolicy(FocusHandler.getFocusTraversalPolicy());
-            checkContainer();
-            SwingGlueLayer.getSwingGlueLayer().registerRepaintManager(this);
-            container.add(this);
-        }
-        SGLeaf getNode() {
-            return SGComponent.this;
-        }
-        private boolean contains = false;
-        @Override
-        public boolean contains(int x, int y) {
-            return contains;
-        }
-        void setContains(boolean contains) {
-            this.contains = contains;
-        }
-        @Override
-        protected void processFocusEvent(FocusEvent e) {
-            if (focusLogger.isEnabled(Level.MESSAGE)) {
-                String str = "";
-                switch(e.getID()) {
-                case FocusEvent.FOCUS_GAINED:
-                    str = "FOCUS_GAINED";
-                    break;
-                case FocusEvent.FOCUS_LOST:
-                    str = "FOCUS_LOST";
-                }
-                focusLogger.message(str + " on peer " + SGComponent.this); 
-            }
-            switch (e.getID()) {
-            case FocusEvent.FOCUS_GAINED: 
-                FocusHandler.purgeAllExcept(SGComponent.this);
-                SGComponent.this.getPanel().setFocusOwner(SGComponent.this);
-                break;
-            case FocusEvent.FOCUS_LOST:
-                SGComponent.this.getPanel().setFocusOwner(null);
-                break;
-            }
-            //TODO idk: FOCUS_LOST do we want to handle it?
-            FocusEvent event = new FocusEvent(e.getComponent(), 
-                    e.getID(), e.isTemporary(), e.getOppositeComponent());
-            SGComponent.this.processFocusEvent(event);
-        }
-        
-        @Override
-        public void repaint(long tm, int x, int y, int width, int height) {
-            SGComponent.this.repaint(
-                new Rectangle2D.Float(x, y, width, height));
-        }
-
-        @Override
-        public boolean isShowing() {
-            return true;
-        }
-        
-        @Override
-        public boolean isVisible() {
-            return true;
-        }
-        
-        
-        /*
-         * note: too bad we can not use concurrent package because of mobile 
-         * platform.
-         */
-        //to be accessed on the EDT only
-        private boolean validateRunnableDone = true;
-        private Runnable validateRunnable = new Runnable() {
-            public void run() {
-                validate();
-                validateRunnableDone = true;
-            }
-        };
-        @Override
-        public void invalidate() {
-            super.invalidate();
-            if (validateRunnableDone) {
-                validateRunnableDone = false;
-                SwingUtilities.invokeLater(validateRunnable);
-            } 
-        }
-        
-        @Override
-        public void validate() {
-            Dimension oldSize = getSize();
-            Dimension newSize;
-            if (component != null) {
-                if (size != null) {
-                    newSize = size;
-                } else {
-                    newSize = component.getPreferredSize();
-                }
-            } else {
-                newSize = new Dimension(0, 0);
-            }
-            if (!newSize.equals(oldSize)) {
-                SGComponent.this.repaint(true);
-                setSize(newSize);
-            }
-            super.validate();
-        }
-    }
+      SGComponent getNode() {
+         return SGComponent.this;
+      }
+   }
 }

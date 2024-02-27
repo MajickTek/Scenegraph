@@ -1,202 +1,284 @@
-/*
- * Copyright 2007 Sun Microsystems, Inc.  All Rights Reserved.
- * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
- *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
- *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
- *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
- */
-
 package com.sun.scenario.scenegraph;
 
+import com.sun.scenario.effect.Effect;
 import java.awt.Graphics2D;
-import java.awt.geom.Rectangle2D;
+import java.awt.GraphicsConfiguration;
+import java.awt.Image;
+import java.awt.Rectangle;
 import java.awt.geom.AffineTransform;
+import java.awt.geom.Rectangle2D;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * This class is the common base class for a type of node that interposes
- * a single operation or attribute on the tree and then transfers control
- * directly to its descendants.
- * An {@link SGGroup} node could be used here, but most cases only want
- * to interpose in a single location in the tree and becoming an
- * {@code SGGroup} just for that one purpose would be both much more
- * heavyweight and would imply a more extensive modification of the tree
- * (allowing for multiple branches) just to interpose a single element.
- *
- * @author Flar
- */
 public class SGFilter extends SGParent {
+   public static final int NONE = 0;
+   public static final int UNTRANSFORMED = 1;
+   public static final int TRANSFORMED = 2;
+   public static final int BOTH = 3;
+   public static final int CACHED = 4;
+   public static final int CLIPPED = 8;
+   private SGNode child;
+   private List<SGNode> singletonList;
 
-    /**
-     * Flag indicating that the filter implementation does not need
-     * access to the source as a raster image.
-     */
-    public static final int NONE          = (0 << 0);
-    /**
-     * Flag indicating that the filter implementation needs access to
-     * the source as a raster image (in the original, local coordinate
-     * space of the child node).
-     */
-    public static final int UNTRANSFORMED = (1 << 0);
-    /**
-     * Flag indicating that the filter implementation needs access to
-     * the source as a raster image (in the transformed coordinate space
-     * of the child node).
-     */
-    public static final int TRANSFORMED   = (1 << 1);
-    /**
-     * Flag indicating that the filter implementation needs access to
-     * the source as a raster image in both untransformed and transformed
-     * formats.
-     * This is equivalent to {@code (UNTRANSFORMED | TRANSFORMED)}.
-     */
-    public static final int BOTH          = UNTRANSFORMED | TRANSFORMED;
-    /**
-     * Flag indicating that the filter implementation has already cached
-     * the rendering of the source and can render it via renderFromCache().
-     */
-    public static final int CACHED        = (1 << 2);
-    
-    private SGNode child;
-    private List<SGNode> singletonList;
-    
-    /** Creates a new instance of SGFilter */
-    public SGFilter() {
-    }
-    
-    public final List<SGNode> getChildren() {
-        if (child == null) {
-            return Collections.emptyList();
-        } else {
-            if (singletonList == null) {
-                singletonList = Collections.singletonList(child);
+   public final List<SGNode> getChildren() {
+      if (this.child == null) {
+         return Collections.emptyList();
+      } else {
+         if (this.singletonList == null) {
+            this.singletonList = Collections.singletonList(this.child);
+         }
+
+         return this.singletonList;
+      }
+   }
+
+   public final SGNode getChild() {
+      return this.child;
+   }
+
+   public void setChild(SGNode child) {
+      if (child == null) {
+         throw new IllegalArgumentException("null child");
+      } else {
+         if (child != this.child) {
+            SGParent oldParent = child.getParent();
+            if (oldParent != null) {
+               oldParent.remove(child);
             }
-            return singletonList;
-        }
-    }
-    
-    public final SGNode getChild() {
-        return child;
-    }
-    
-    public void setChild(SGNode child) {
-        if (child == null) {
-            throw new IllegalArgumentException("null child");
-        }
-        if (child == this.child) {
-            return;
-        }
-        SGParent oldParent = child.getParent();
-        if (oldParent != null) {
-            oldParent.remove(child);
-        }
-        this.singletonList = null;
-        this.child = child;
-        child.setParent(this);
 
-        // mark the current bounds dirty (and force repaint of former
-        // bounds as well)
-        markDirty(true);
-    }
+            if (this.child != null) {
+               this.child.setParent((Object)null);
+            }
 
-    @Override
-    public void remove(SGNode node) {
-        if (node == child) {
-            remove();
-        }
-    }
-    
-    public void remove() {
-        FocusHandler.removeNotify(child);
-        this.child.setParent(null);
-        this.child = null;
-        this.singletonList = null;
+            this.singletonList = null;
+            this.child = child;
+            child.setParent(this);
+            this.dispatchAllPendingEvents();
+            this.updateCursor();
+         }
 
-        // mark the current bounds dirty (and force repaint of former
-        // bounds as well)
-        markDirty(true);
-        updateCursor();
-    }
+      }
+   }
 
-    public void renderFromCache(Graphics2D g) {
-    }
+   public void remove(SGNode node) {
+      if (node == this.child) {
+         this.remove();
+      }
 
-    public boolean canSkipRendering() {
-        return false;
-    }
+   }
 
-    public boolean canSkipChildren() {
-        return false;
-    }
-    
-    /**
-     * Returns true if the bounds of this filter node are (potentially)
-     * larger than the bounds of its child, false otherwise.
-     * The default implementation of this method always returns false;
-     * subclasses should override accordingly.
-     * 
-     * @return whether the bounds of this node expand outside the child bounds
-     */
-    public boolean canExpandBounds() {
-        return false;
-    }
-    
-    public int needsSourceContent() {
-        return NONE;
-    }
-    
-    public void setupRenderGraphics(Graphics2D g) {
-    }
-    
-    public void renderFinalImage(Graphics2D g, SGSourceContent srcContent) {
-    }
-    
-    @Override
-    public Rectangle2D getBounds(AffineTransform transform) {
-        if (child == null) {
-            // just an empty rectangle
-            return new Rectangle2D.Float();
-        } else {
-            return child.getBounds(transform);
-        }
-    }
-    
-    /**
-     * Calculates the accumulated bounds object representing the
-     * global bounds relative to the root of the tree.
-     * Since most filter nodes have the same accumulated bounds as
-     * their child, this implementation will simply report the
-     * accumulated bounds of its child.
-     * Subclasses may override this behavior if they do not conform
-     * to the above assumption.
-     */
-    @Override
-    Rectangle2D calculateAccumBounds() {
-        if (child == null) {
-            return new Rectangle2D.Float();
-        } else {
-            return child.getTransformedBoundsRelativeToRoot();
-        }
-    }
+   public void remove() {
+      FocusHandler.removeNotify(this.child);
+      SGNode c = this.child;
+      if (c != null) {
+         c.setParent((Object)null);
+         c.dispatchAllPendingEvents();
+      }
 
-    @Override
-    boolean hasOverlappingContents() {
-        return child.hasOverlappingContents();
-    }
+      this.child = null;
+      this.singletonList = null;
+      this.dispatchAllPendingEvents();
+      this.updateCursor();
+   }
+
+   public void renderFromCache(Graphics2D g) {
+   }
+
+   public boolean canSkipRendering() {
+      return false;
+   }
+
+   public boolean canSkipChildren() {
+      return false;
+   }
+
+   public boolean canExpandBounds() {
+      return false;
+   }
+
+   void doTransformChanged() {
+      super.doTransformChanged();
+      if (this.child != null) {
+         this.child.transformChanged();
+      }
+
+   }
+
+   void dispatchPendingEvents() {
+      super.dispatchPendingEvents();
+      if (this.child != null) {
+         this.child.dispatchPendingEvents();
+      }
+
+   }
+
+   Rectangle2D accumulateDirtyChildren(Rectangle2D r, Rectangle2D clip) {
+      if (this.canExpandBounds()) {
+         r = accumulate(r, this.getTransformedBounds(), false);
+      }
+
+      if (this.child != null) {
+         r = this.child.accumulateDirty(r, clip);
+      }
+
+      return r;
+   }
+
+   public int needsSourceContent(Graphics2D g) {
+      return 0;
+   }
+
+   public void setupRenderGraphics(Graphics2D g) {
+   }
+
+   public void renderFinalImage(Graphics2D g, SGSourceContent srcContent) {
+   }
+
+   void render(Graphics2D g, Rectangle dirtyRegion, boolean clearDirty) {
+      if (!this.isVisible()) {
+         if (clearDirty) {
+            this.clearDirty();
+         }
+
+      } else {
+         if (dirtyRegion != null) {
+            Rectangle2D bounds = this.getTransformedBounds();
+            if (bounds == null || !bounds.intersects(dirtyRegion)) {
+               if (clearDirty) {
+                  this.clearDirty();
+               }
+
+               return;
+            }
+         }
+
+         if (this.child != null) {
+            Graphics2D gOrig = (Graphics2D)g.create();
+            if (this.canSkipRendering()) {
+               if (!this.canSkipChildren()) {
+                  this.child.render(gOrig, dirtyRegion, clearDirty);
+               }
+            } else {
+               int sourceType = this.needsSourceContent(gOrig);
+               if (sourceType == 0) {
+                  this.setupRenderGraphics(gOrig);
+                  this.child.render(gOrig, dirtyRegion, clearDirty);
+               } else if (sourceType == 4) {
+                  this.renderFromCache(gOrig);
+               } else {
+                  Image xformImage = null;
+                  Rectangle xformBounds = null;
+                  Image unxformImage = null;
+                  Rectangle unxformBounds = this.child.getBounds().getBounds();
+                  Rectangle childDirty = dirtyRegion == null ? null : this.child.getTransformedBounds().getBounds();
+                  if (unxformBounds.isEmpty()) {
+                     if (clearDirty) {
+                        this.clearDirty();
+                     }
+
+                     return;
+                  }
+
+                  GraphicsConfiguration gc = gOrig.getDeviceConfiguration();
+                  AffineTransform gtx = gOrig.getTransform();
+                  int nodeX;
+                  int nodeY;
+                  int nodeW;
+                  if ((sourceType & 2) != 0) {
+                     xformBounds = this.child.getBounds(gtx).getBounds();
+                     gOrig.setTransform(new AffineTransform());
+                     Rectangle destRect;
+                     if ((sourceType & 8) != 0) {
+                        destRect = gOrig.getClipBounds();
+                        if (destRect != null) {
+                           Rectangle.intersect(xformBounds, destRect, destRect);
+                           if (destRect.isEmpty()) {
+                              if (clearDirty) {
+                                 this.clearDirty();
+                              }
+
+                              return;
+                           }
+                        } else {
+                           destRect = xformBounds;
+                        }
+                     } else {
+                        destRect = xformBounds;
+                     }
+
+                     nodeX = destRect.x;
+                     nodeY = destRect.y;
+                     nodeW = destRect.width;
+                     int nodeH = destRect.height;
+                     if (this instanceof SGRenderCache) {
+                        xformImage = Effect.createCompatibleImage(gc, nodeW, nodeH);
+                     } else {
+                        xformImage = Effect.getCompatibleImage(gc, nodeW, nodeH);
+                     }
+
+                     Graphics2D gFilter = (Graphics2D)xformImage.getGraphics();
+                     AffineTransform filterXform = AffineTransform.getTranslateInstance((double)(-nodeX), (double)(-nodeY));
+                     filterXform.concatenate(gtx);
+                     gFilter.setTransform(filterXform);
+                     this.setupRenderGraphics(gFilter);
+                     this.child.render(gFilter, childDirty, clearDirty);
+                     gOrig.translate(nodeX, nodeY);
+                  }
+
+                  if ((sourceType & 1) != 0) {
+                     if (xformImage != null && gtx.isIdentity()) {
+                        unxformImage = xformImage;
+                     } else {
+                        int nodeX = unxformBounds.x;
+                        nodeX = unxformBounds.y;
+                        nodeY = unxformBounds.width;
+                        nodeW = unxformBounds.height;
+                        unxformImage = Effect.getCompatibleImage(gc, nodeY, nodeW);
+                        Graphics2D gFilter = (Graphics2D)unxformImage.getGraphics();
+                        AffineTransform filterXform = AffineTransform.getTranslateInstance((double)(-nodeX), (double)(-nodeX));
+                        gFilter.setTransform(filterXform);
+                        this.setupRenderGraphics(gFilter);
+                        this.child.render(gFilter, childDirty, clearDirty);
+                     }
+                  }
+
+                  SGSourceContent sourceContent = new SGSourceContent(gtx, unxformImage, unxformBounds, xformImage, xformBounds);
+                  this.renderFinalImage(gOrig, sourceContent);
+                  if (unxformImage != null) {
+                     Effect.releaseCompatibleImage(gc, unxformImage);
+                  }
+
+                  if (xformImage != null && xformImage != unxformImage) {
+                     Effect.releaseCompatibleImage(gc, xformImage);
+                  }
+               }
+            }
+         }
+
+         if (clearDirty) {
+            this.clearDirty();
+         }
+
+      }
+   }
+
+   public Rectangle2D getBounds(AffineTransform transform) {
+      return (Rectangle2D)(this.child == null ? new Rectangle2D.Float() : this.child.getBounds(transform));
+   }
+
+   Rectangle2D calculateAccumBounds() {
+      return (Rectangle2D)(this.child == null ? new Rectangle2D.Float() : this.child.getTransformedBounds());
+   }
+
+   boolean hasOverlappingContents() {
+      return this.child.hasOverlappingContents();
+   }
+
+   public SGNode lookup(String id) {
+      if (id.equals(this.getID())) {
+         return this;
+      } else {
+         return this.child != null ? this.child.lookup(id) : null;
+      }
+   }
 }

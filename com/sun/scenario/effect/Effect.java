@@ -1,36 +1,17 @@
-/*
- * Copyright 2008 Sun Microsystems, Inc.  All Rights Reserved.
- * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
- *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
- *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
- *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
- */
-
 package com.sun.scenario.effect;
 
 import com.sun.scenario.effect.impl.EffectPeer;
+import com.sun.scenario.effect.impl.ImageData;
+import com.sun.scenario.effect.impl.state.AccessHelper;
 import java.awt.Graphics2D;
 import java.awt.GraphicsConfiguration;
 import java.awt.Image;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.geom.AffineTransform;
+import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
+import java.awt.image.ImageObserver;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
@@ -38,411 +19,257 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * The base class for all filter effects.
- * 
- * @author Chris Campbell
- */
 public abstract class Effect {
+   public static final Effect DefaultInput = null;
+   private final PropertyChangeSupport pcs = new PropertyChangeSupport(this);
+   private final PropertyChangeListener inputListener;
+   private final List<Effect> inputs;
+   private final List<Effect> unmodifiableInputs;
+   private final int maxInputs;
 
-    /**
-     * Flag indicating that the effect implementation does not need
-     * access to the source as a raster image.
-     */
-    public static final int NONE          = (0 << 0);
-    /**
-     * Flag indicating that the effect implementation needs access to
-     * the source as a raster image (in the original, local coordinate
-     * space of the source content).
-     */
-    public static final int UNTRANSFORMED = (1 << 0);
-    /**
-     * Flag indicating that the effect implementation needs access to
-     * the source as a raster image (in the transformed coordinate space
-     * of the source content).
-     */
-    public static final int TRANSFORMED   = (1 << 1);
-    /**
-     * Flag indicating that the effect implementation needs access to
-     * the source as a raster image in both untransformed and transformed
-     * formats.
-     * This is equivalent to {@code (UNTRANSFORMED | TRANSFORMED)}.
-     */
-    public static final int BOTH          = UNTRANSFORMED | TRANSFORMED;
-    
-    private final PropertyChangeSupport pcs = new PropertyChangeSupport(this);
-    private final List<Effect> inputs;
-    private SourceContent content;
-    
-    /**
-     * Constructs an {@code Effect} with no inputs.
-     */
-    protected Effect() {
-        this.inputs = Collections.emptyList();
-    }
-    
-    /**
-     * Constructs an {@code Effect} with exactly one input.
-     * 
-     * @param input the input {@code Effect}
-     * @throws IllegalArgumentException if {@code input} is null
-     */
-    protected Effect(Effect input) {
-        if (input == null) {
-            throw new IllegalArgumentException("Input must be non-null");
-        }
-        this.inputs = Collections.singletonList(input);
-        
-        input.addPropertyChangeListener(new PropertyChangeListener() {
-            public void propertyChange(PropertyChangeEvent evt) {
-                firePropertyChange("input0", null, inputs.get(0));
+   protected Effect() {
+      this.inputs = Collections.emptyList();
+      this.unmodifiableInputs = this.inputs;
+      this.maxInputs = 0;
+      this.inputListener = null;
+   }
+
+   protected Effect(Effect input) {
+      this.inputs = new ArrayList(1);
+      this.unmodifiableInputs = Collections.unmodifiableList(this.inputs);
+      this.maxInputs = 1;
+      this.inputListener = new InputChangeListener();
+      this.setInput(0, input);
+   }
+
+   protected Effect(Effect input1, Effect input2) {
+      this.inputs = new ArrayList(2);
+      this.unmodifiableInputs = Collections.unmodifiableList(this.inputs);
+      this.maxInputs = 2;
+      this.inputListener = new InputChangeListener();
+      this.setInput(0, input1);
+      this.setInput(1, input2);
+   }
+
+   Object getState() {
+      return null;
+   }
+
+   public int getNumInputs() {
+      return this.inputs.size();
+   }
+
+   public final List<Effect> getInputs() {
+      return this.unmodifiableInputs;
+   }
+
+   protected void setInput(int index, Effect input) {
+      if (index >= 0 && index < this.maxInputs) {
+         if (index < this.inputs.size()) {
+            Effect oldInput = (Effect)this.inputs.get(index);
+            if (oldInput != null) {
+               oldInput.removePropertyChangeListener(this.inputListener);
             }
-        });
-    }
-    
-    /**
-     * Constructs an {@code Effect} with exactly two inputs.
-     *
-     * @param input1 the first input {@code Effect}
-     * @param input2 the second input {@code Effect}
-     * @throws IllegalArgumentException if either {@code input1} or
-     * {@code input2} is null
-     */
-    protected Effect(Effect input1, Effect input2) {
-        if (input1 == null || input2 == null) {
-            throw new IllegalArgumentException("Inputs must be non-null");
-        }
-        ArrayList<Effect> tmp = new ArrayList<Effect>();
-        tmp.add(input1);
-        tmp.add(input2);
-        this.inputs = Collections.unmodifiableList(tmp);
-        
-        // listen for property changes in any of the inputs (the JavaBeans
-        // spec is vague about how to handle situations like this, but as
-        // long as we fire *some* event, it will be good enough to ensure
-        // that e.g. a scenegraph node will be repainted after making a
-        // change to one of the input properties)
-        input1.addPropertyChangeListener(new PropertyChangeListener() {
-            public void propertyChange(PropertyChangeEvent evt) {
-                firePropertyChange("input0", null, inputs.get(0));
+
+            this.inputs.set(index, input);
+         } else {
+            this.inputs.add(input);
+         }
+
+         if (input != null) {
+            input.addPropertyChangeListener(this.inputListener);
+         }
+
+         this.firePropertyChange("inputs", (Object)null, this.inputs);
+      } else {
+         throw new IllegalArgumentException("Index must be within allowable range");
+      }
+   }
+
+   public void render(Graphics2D g, float x, float y, Effect defaultInput) {
+      AffineTransform transform = g.getTransform();
+      transform.translate((double)x, (double)y);
+      if (transform.isIdentity()) {
+         transform = null;
+      }
+
+      Graphics2D gtmp = (Graphics2D)g.create();
+      gtmp.setTransform(new AffineTransform());
+      GraphicsConfiguration gc = gtmp.getDeviceConfiguration();
+      ImageData res = this.filter(gc, transform, defaultInput);
+      Rectangle r = res.getBounds();
+      gtmp.drawImage(res.getImage(), r.x, r.y, (ImageObserver)null);
+      res.unref();
+      gtmp.dispose();
+   }
+
+   public Rectangle2D combineBounds(Rectangle2D... inputBounds) {
+      Rectangle2D ret = null;
+      if (inputBounds.length == 1) {
+         ret = inputBounds[0];
+      } else {
+         Rectangle2D[] arr$ = inputBounds;
+         int len$ = inputBounds.length;
+
+         for(int i$ = 0; i$ < len$; ++i$) {
+            Rectangle2D r = arr$[i$];
+            if (r != null && !r.isEmpty()) {
+               if (ret == null) {
+                  ret = (Rectangle2D)r.clone();
+               } else {
+                  ((Rectangle2D)ret).add(r);
+               }
             }
-        });
-        input2.addPropertyChangeListener(new PropertyChangeListener() {
-            public void propertyChange(PropertyChangeEvent evt) {
-                firePropertyChange("input1", null, inputs.get(1));
+         }
+      }
+
+      if (ret == null) {
+         ret = new Rectangle2D.Float();
+      }
+
+      return (Rectangle2D)ret;
+   }
+
+   public Rectangle getResultBounds(AffineTransform transform, ImageData... inputDatas) {
+      int numinputs = inputDatas.length;
+      Rectangle2D[] inputBounds = new Rectangle2D[numinputs];
+
+      for(int i = 0; i < numinputs; ++i) {
+         inputBounds[i] = inputDatas[i].getBounds();
+      }
+
+      return this.combineBounds(inputBounds).getBounds();
+   }
+
+   public abstract ImageData filter(GraphicsConfiguration var1, AffineTransform var2, Effect var3);
+
+   protected Rectangle2D transformBounds(AffineTransform tx, Rectangle2D r) {
+      if (tx != null && !tx.isIdentity()) {
+         if (tx.getType() == 1) {
+            Rectangle2D.Float ret = new Rectangle2D.Float();
+            ret.setRect((float)(r.getX() + tx.getTranslateX()), (float)(r.getY() + tx.getTranslateY()), (float)r.getWidth(), (float)r.getHeight());
+            return ret;
+         } else {
+            return tx.createTransformedShape(r).getBounds();
+         }
+      } else {
+         return r;
+      }
+   }
+
+   protected ImageData ensureTransform(GraphicsConfiguration config, ImageData original, AffineTransform transform) {
+      if (transform != null && !transform.isIdentity()) {
+         Rectangle origBounds = original.getBounds();
+         if (transform.getType() == 1) {
+            double tx = transform.getTranslateX();
+            double ty = transform.getTranslateY();
+            int itx = (int)tx;
+            int ity = (int)ty;
+            if ((double)itx == tx && (double)ity == ty) {
+               Rectangle r = new Rectangle(origBounds);
+               r.translate(itx, ity);
+               ImageData ret = new ImageData(original, r);
+               original.unref();
+               return ret;
             }
-        });
-    }
-    
-    /**
-     * Returns the (immutable) list of input {@code Effect}s, or an empty
-     * list if no inputs were specified at construction time.
-     * 
-     * @return the list of input {@code Effect}s
-     */
-    public final List<Effect> getInputs() {
-        return inputs;
-    }
-    
-    /**
-     * Returns the {@code SourceContent} that is currently in use for
-     * this {@code Effect}.
-     * 
-     * @return the current {@code SourceContent}, or null
-     */
-    public final SourceContent getSourceContent() {
-        return content;
-    }
-    
-    /**
-     * Sets the {@code SourceContent} for this {@code Effect} and any
-     * inputs.  This operation works recursively to set the source content
-     * for an entire {@code Effect} tree.
-     * 
-     * @param content the {@code SourceContent} to be made current
-     */
-    public void setSourceContent(SourceContent content) {
-        this.content = content;
-        for (Effect input : inputs) {
-            input.setSourceContent(content);
-        }
-    }
-    
-    /**
-     * Applies this filter effect to the series of images represented by
-     * the input {@code Effect}s and/or {@code SourceContent}, and then
-     * returns the resulting {@code Image}.
-     * 
-     * @param config the {@code GraphicsConfiguration} that will be used
-     * for creating images and for performing the filter operation
-     * @return the result of this filter operation
-     */
-    public abstract Image filter(GraphicsConfiguration config);
-    
-    /**
-     * Convenience method that calls {@code filter()} and then transforms
-     * the resulting image into device space if the {@code transformed}
-     * parameter is true.
-     * 
-     * @param config the {@code GraphicsConfiguration} that will be used
-     * for creating images and for performing the filter operation
-     * @param transformed if true, converts the filtered result into device
-     * space; otherwise, returns the filtered result without transformation
-     * @return the transformed result of this filter operation
-     */
-    public final Image filter(GraphicsConfiguration config,
-                              boolean transformed)
-    {
-        Image img = filter(config);
-        if (transformed && !isInDeviceSpace()) {
-            AffineTransform xform = content.getTransform();
-            int type = xform.getType();
-            if (type != AffineTransform.TYPE_IDENTITY &&
-                type != AffineTransform.TYPE_TRANSLATION)
-            {
-                // setup graphics transform so that the (original,
-                // untransformed) effect image is transformed into device space
-                Image orig = img;
-                Rectangle xformBounds = content.getTransformedBounds().getBounds();
-                Rectangle2D origBounds = getBounds();
-                img = getCompatibleImage(config, xformBounds.width, xformBounds.height);
-                Graphics2D g2 = (Graphics2D)img.getGraphics();
-                AffineTransform xform2 = new AffineTransform();
-                xform2.translate(-xformBounds.getX(), -xformBounds.getY());
-                xform2.concatenate(xform);
-                xform2.translate(origBounds.getX(), origBounds.getY());
-                g2.setTransform(xform2);
-                g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                                    RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-                g2.drawImage(orig, 0, 0, null);
-                g2.dispose();
-            }
-        }
-        return img;
-    }
-    
-    /**
-     * Applies this filter effect to the series of inputs and then renders
-     * the result to the provided {@code Graphics2D}.  This method is
-     * similar to calling:
-     * <pre>
-     *     g.drawImage(filter(transformed), x, y, null);
-     * </pre>
-     * except that it is likely to be more efficient (and correct).
-     * 
-     * @param g the {@code Graphics2D} to which the {@code Effect} will be
-     * rendered
-     * @param x the x location of the filtered result
-     * @param y the y location of the filtered result
-     * @param transformed if true, converts the filtered result into device
-     * space; otherwise, returns the filtered result without transformation
-     */
-    public final void render(Graphics2D g, int x, int y, boolean transformed) {
-        // TODO: validate VolatileImages...
-        GraphicsConfiguration gc = g.getDeviceConfiguration();
-        Image res = filter(gc, transformed);
-        g.drawImage(res, x, y, null);
-        releaseCompatibleImage(gc, res);
-    }
+         }
 
-    /**
-     * Returns the bounding box that will be affected by this filter
-     * operation, given the list of input {@code Effect}s and/or the
-     * current {@code SourceContent}.  Note that the returned bounds can
-     * be smaller or larger than one or more of the inputs.
-     * 
-     * @return the bounding box of this filter
-     */
-    public abstract Rectangle2D getBounds();
+         Rectangle xformBounds = this.transformBounds(transform, origBounds).getBounds();
+         Image img = getCompatibleImage(config, xformBounds.width, xformBounds.height);
+         Graphics2D g2 = (Graphics2D)img.getGraphics();
+         g2.translate(-xformBounds.x, -xformBounds.y);
+         g2.transform(transform);
+         g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+         g2.drawImage(original.getImage(), origBounds.x, origBounds.y, (ImageObserver)null);
+         g2.dispose();
+         original.unref();
+         return new ImageData(config, img, xformBounds);
+      } else {
+         return original;
+      }
+   }
 
-    /**
-     * Returns the bounding box of this filter operation, transformed
-     * according to the {@code AffineTransform} set in the current
-     * {@code SourceContent}.
-     * 
-     * @return the transformed bounding box of this filter
-     */
-    public final Rectangle2D getTransformedBounds() {
-        Rectangle2D r = getBounds();
-        AffineTransform xform = content.getTransform();
-        if (!isInDeviceSpace() && xform != null && !xform.isIdentity()) {
-            r = xform.createTransformedShape(r).getBounds();
-        }
-        return r;
-    }
-    
-    /**
-     * Returns a new {@code Image} that is most compatible with the
-     * given {@code GraphicsConfiguration}.  This method will select the image
-     * type that is most appropriate for use with the current rendering
-     * pipeline, graphics hardware, and screen pixel layout.
-     * 
-     * @param gc the target screen device
-     * @param w the width of the image
-     * @param h the height of the image
-     * @return a new {@code Image} with the given dimensions
-     * @throws IllegalArgumentException if {@code gc} is null, or if
-     * either {@code w} or {@code h} is non-positive
-     */
-    public static Image createCompatibleImage(GraphicsConfiguration gc, int w, int h) {
-        return EffectPeer.getRenderer(gc).createCompatibleImage(w, h);
-    }
+   public final Rectangle2D getBounds() {
+      return this.getBounds((AffineTransform)null, (Effect)null);
+   }
 
-    /**
-     * Returns an {@code Image} that is most compatible with the
-     * given {@code GraphicsConfiguration}.  This method will select the image
-     * type that is most appropriate for use with the current rendering
-     * pipeline, graphics hardware, and screen pixel layout.
-     * <p>
-     * Note that the framework attempts to pool images for recycling purposes
-     * whenever possible.  Therefore, when finished using an image returned
-     * by this method, it is highly recommended that you
-     * {@link #releaseCompatibleImage release} the image back to the
-     * shared pool for others to use.
-     * 
-     * @param gc the target screen device
-     * @param w the width of the image
-     * @param h the height of the image
-     * @return an {@code Image} with the given dimensions
-     * @throws IllegalArgumentException if {@code gc} is null, or if
-     * either {@code w} or {@code h} is non-positive
-     * @see #releaseCompatibleImage
-     */
-    public static Image getCompatibleImage(GraphicsConfiguration gc, int w, int h) {
-        return EffectPeer.getRenderer(gc).getCompatibleImage(w, h);
-    }
-    
-    /**
-     * Releases an {@code Image} created by the
-     * {@link #getCompatibleImage getCompatibleImage()} method
-     * back into the shared pool.
-     * 
-     * @param gc the target screen device
-     * @param image the {@code Image} to be released
-     * @see #getCompatibleImage
-     */
-    public static void releaseCompatibleImage(GraphicsConfiguration gc, Image image) {
-        EffectPeer.getRenderer(gc).releaseCompatibleImage(image);
-    }
-    
-    /**
-     * Returns true if this {@code Effect} produces an {@code Image} in
-     * device space, or false if the {@code Image} will need to be converted
-     * into device space in a later stage.
-     * <p>
-     * {@code Effect}s that inherently work in pixel space, such as a
-     * convolution, will typically operate only on untransformed sources.
-     * The result of such {@code Effect}s can be transformed into device
-     * space in a later stage (e.g. prior to display), ideally using a
-     * high-quality scaling algorithm.
-     * 
-     * @return true if this {@code Effect} is in device space; false otherwise
-     */
-    public boolean isInDeviceSpace() {
-        for (Effect input : getInputs()) {
-            if (input.isInDeviceSpace()) {
-                // as long as we have at least one input in device space,
-                // we will end up converting the rest to match
-                return true;
-            }
-        }
-        return false;
-    }
-    
-    /**
-     * Returns an integer indicating whether the effect implementation needs
-     * access to the {@code TRANSFORMED} source, {@code UNTRANSFORMED} source,
-     * {@code BOTH}, or {@code NONE}.
-     * 
-     * @return one of {@code TRANSFORMED}, {@code UNTRANSFORMED},
-     * {@code BOTH}, or {@code NONE}
-     */
-    public int needsSourceContent() {
-        int val = NONE;
-        for (Effect input : getInputs()) {
-            val |= input.needsSourceContent();
-        }
-        return val;
-    }
-    
-    /**
-     * A set of values that represent the possible levels of acceleration
-     * for an {@code Effect} implementation.
-     * 
-     * @see Effect#getAccelType
-     */
-    public enum AccelType {
-        /**
-         * Indicates that this {@code Effect} is implemented in software
-         * (i.e., running on the CPU).
-         */
-        NONE("CPU"),
-        /**
-         * Indicates that this {@code Effect} is being accelerated in
-         * graphics hardware via OpenGL.
-         */
-        OPENGL("OpenGL"),
-        /**
-         * Indicates that this {@code Effect} is being accelerated in
-         * graphics hardware via Direct3D.
-         */
-        DIRECT3D("Direct3D");
-        
-        private String text;
-        
-        private AccelType(String text) {
-            this.text = text;
-        }
+   Effect getDefaultedInput(int inputIndex, Effect defaultInput) {
+      return getDefaultedInput((Effect)this.inputs.get(inputIndex), defaultInput);
+   }
 
-        @Override
-        public String toString() {
-            return text;
-        }
-    }
-    
-    /**
-     * Returns one of the {@link AccelType AccelType} values, indicating
-     * whether this {@code Effect} is accelerated in hardware for the
-     * given {@code GraphicsConfiguration}.
-     * 
-     * @param config the {@code GraphicsConfiguration} that will be used
-     * for performing the filter operation
-     * @return one of the {@code AccelType} values
-     */
-    public abstract AccelType getAccelType(GraphicsConfiguration config);
-    
-    /**
-     * Adds the given {@code PropertyChangeListener} to the list
-     * of listeners.
-     * 
-     * @param listener the {@code PropertyChangeListener} to be added
-     */
-    public void addPropertyChangeListener(PropertyChangeListener listener) {
-        pcs.addPropertyChangeListener(listener);
-    }
+   static Effect getDefaultedInput(Effect listedInput, Effect defaultInput) {
+      return listedInput == null ? defaultInput : listedInput;
+   }
 
-    /**
-     * Removes the given {@code PropertyChangeListener} to the list
-     * of listeners.
-     * 
-     * @param listener the {@code PropertyChangeListener} to be removed
-     */
-    public void removePropertyChangeListener(PropertyChangeListener listener) {
-        pcs.removePropertyChangeListener(listener);
-    }
-    
-    /**
-     * Reports a bound property update to any registered listeners.
-     * No event is fired if {@code oldValue} and {@code newValue}
-     * are equal and non-null.
-     * 
-     * @param prop the programmatic name of the property that was changed
-     * @param oldValue the old value of the property
-     * @param newValue the new value of the property
-     */
-    protected void firePropertyChange(String prop,
-                                      Object oldValue, Object newValue)
-    {
-        pcs.firePropertyChange(prop, oldValue, newValue);
-    }
+   public abstract Rectangle2D getBounds(AffineTransform var1, Effect var2);
+
+   public Point2D transform(Point2D p, Effect defaultInput) {
+      return p;
+   }
+
+   public Point2D untransform(Point2D p, Effect defaultInput) {
+      return p;
+   }
+
+   public static Image createCompatibleImage(GraphicsConfiguration gc, int w, int h) {
+      return EffectPeer.getRenderer(gc).createCompatibleImage(w, h);
+   }
+
+   public static Image getCompatibleImage(GraphicsConfiguration gc, int w, int h) {
+      return EffectPeer.getRenderer(gc).getCompatibleImage(w, h);
+   }
+
+   public static void releaseCompatibleImage(GraphicsConfiguration gc, Image image) {
+      EffectPeer.getRenderer(gc).releaseCompatibleImage(image);
+   }
+
+   public abstract AccelType getAccelType(GraphicsConfiguration var1);
+
+   public void addPropertyChangeListener(PropertyChangeListener listener) {
+      this.pcs.addPropertyChangeListener(listener);
+   }
+
+   public void removePropertyChangeListener(PropertyChangeListener listener) {
+      this.pcs.removePropertyChangeListener(listener);
+   }
+
+   protected void firePropertyChange(String prop, Object oldValue, Object newValue) {
+      this.pcs.firePropertyChange(prop, oldValue, newValue);
+   }
+
+   static {
+      AccessHelper.setStateAccessor(new AccessHelper.StateAccessor() {
+         public Object getState(Effect effect) {
+            return effect.getState();
+         }
+      });
+   }
+
+   public static enum AccelType {
+      INTRINSIC("Intrinsic"),
+      NONE("CPU/Java"),
+      SIMD("CPU/SIMD"),
+      FIXED("CPU/Fixed"),
+      OPENGL("OpenGL"),
+      DIRECT3D("Direct3D");
+
+      private String text;
+
+      private AccelType(String text) {
+         this.text = text;
+      }
+
+      public String toString() {
+         return this.text;
+      }
+   }
+
+   private class InputChangeListener implements PropertyChangeListener {
+      private InputChangeListener() {
+      }
+
+      public void propertyChange(PropertyChangeEvent e) {
+         Effect.this.firePropertyChange("inputs", (Object)null, Effect.this.inputs);
+      }
+   }
 }

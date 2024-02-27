@@ -1,147 +1,136 @@
-/*
- * Copyright 2008 Sun Microsystems, Inc.  All Rights Reserved.
- * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
- *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
- *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
- *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
- */
 package com.sun.scenario;
 
+import com.sun.embeddedswing.SwingGlueLayer;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
 import java.util.HashMap;
+import java.util.Map;
 
-/**
- * A simple class to store and retrieve internal Scenario settings in the form of 
- * String key/value pairs.  It is meant to be used in a similar way to System
- * Properties, but without the security  restrictions.  This class is designed
- * primarily to aid in testing and benchmarking Scenario itself.
- * 
- * If you are running in an environment that allows System Property access,
- * this class will attempt to look for a key's valuein the System Properties if
- * none is found in Settings.  This allows Settings to be set on the command
- * line as well as via the Settings API.
- * 
- * @author bchristi
- */
 public class Settings {
+   private final Map<String, String> settings = new HashMap(5);
+   private final PropertyChangeSupport pcs = new PropertyChangeSupport(Settings.class);
+   private static final Object SETTINGS_KEY;
 
-    private static HashMap<String, String> settings =
-            new HashMap<String, String>(5);
-    private static PropertyChangeSupport pcs =
-            new PropertyChangeSupport(Settings.class);
+   private static synchronized Settings getInstance() {
+      Map<Object, Object> contextMap = SwingGlueLayer.getContextMap();
+      Settings instance = (Settings)contextMap.get(SETTINGS_KEY);
+      if (instance == null) {
+         instance = new Settings();
+         contextMap.put(SETTINGS_KEY, instance);
+      }
 
-    /**
-     * Add a new key-value setting.
-     * 
-     * Passing a value of null indicates that the value for this key should be
-     * looked for in the System Properties.
-     * 
-     * If PropertyChangeListeners have been registered for the given key, they
-     * will be notified of a change in value.
-     *
-     * If key is "" or null, this methods throws an IllegalArgumentException.
-     */
-    public static void set(String key, String value) {
-        checkKeyArg(key);
-        String oldVal = get(key);
-        settings.put(key, value);
-        String newVal = value;
-        if (newVal == null) {
-            newVal = get(key);
-        }
-        pcs.firePropertyChange(key, oldVal, newVal);
-    }
+      return instance;
+   }
 
-    /**
-     * Retrieve the value for the given key.
-     * 
-     * If the key is not present in Settings or its value is null, this methods
-     * then checks to see if a value for this key is present in the System
-     * Properties (provided you have sufficient privileges).
-     * 
-     * If no value can be found for the given key, this method returns null.
-     * 
-     * If key is "" or null, this methods throws an IllegalArgumentException.
-     */
-    public static String get(String key) {
-        checkKeyArg(key);
-        String retVal = settings.get(key);
-        if (retVal == null) {
-            try {
-                retVal = System.getProperty(key);
-            } catch (SecurityException ignore) {
-            }
-        }
-        return retVal;
-    }
+   public static void set(String key, String value) {
+      getInstance().setImpl(key, value);
+   }
 
-    /**
-     * Convenience method for boolean settings.
-     * 
-     * If the setting exists and its value is "true", true is returned.
-     * Otherwise, false is returned.
-     * 
-     * If key is "" or null, this methods throws an IllegalArgumentException.
-     */
-    public static boolean getBoolean(String key) {
-        // get() will call checkKeyArg(), so don't check it here
-        String value = get(key);
-        return "true".equals(value);
-    }
+   private void setImpl(String key, String value) {
+      this.checkKeyArg(key);
+      String oldVal = this.getImpl(key);
+      this.settings.put(key, value);
+      String newVal = value;
+      if (value == null) {
+         newVal = this.getImpl(key);
+      }
 
-    /**
-     * Add a PropertyChangeListener for the specified setting
-     *
-     * Note that the PropertyChangeEvent will contain 
-     * old and new values as they would be returned from get(), meaning they
-     * may come from the System Properties.
-     * 
-     * If key is "" or null, this methods throws an IllegalArgumentException.
-     * If listener is null no exception is thrown and no action is taken.
-     */
-    public static void addPropertyChangeListener(String key,
-            PropertyChangeListener pcl) {
-        checkKeyArg(key);
-        pcs.addPropertyChangeListener(key, pcl);
-    }
+      this.pcs.firePropertyChange(key, oldVal, newVal);
+   }
 
-    /**
-     * Remove the specified PropertyChangeListener.
-     * 
-     * If listener is null, or was never added, no exception is thrown and no
-     * action is taken.
-     */
-    public static void removePropertyChangeListener(PropertyChangeListener pcl) {
-        pcs.removePropertyChangeListener(pcl);
-    }
+   public static String get(String key) {
+      return getInstance().getImpl(key);
+   }
 
-    /*
-     * Check that key is a valid Settings key.  If not, throw an
-     * IllegalArgumentException. 
-     *
-     */
-    private static void checkKeyArg(String key) {
-        if (null == key || "".equals(key)) {
-            throw new IllegalArgumentException("null key not allowed");
-        }
-    }
+   private String getImpl(String key) {
+      this.checkKeyArg(key);
+      String retVal = (String)this.settings.get(key);
+      if (retVal == null) {
+         try {
+            retVal = System.getProperty(key);
+         } catch (SecurityException var4) {
+         }
+      }
 
-    private Settings() {
-    }
+      return retVal;
+   }
+
+   public static boolean getBoolean(String key) {
+      return getInstance().getBooleanImpl(key);
+   }
+
+   private boolean getBooleanImpl(String key) {
+      String value = this.getImpl(key);
+      return "true".equals(value);
+   }
+
+   public static boolean getBoolean(String key, boolean defaultVal) {
+      return getInstance().getBooleanImpl(key, defaultVal);
+   }
+
+   private boolean getBooleanImpl(String key, boolean defaultVal) {
+      String value = this.getImpl(key);
+      boolean retVal = defaultVal;
+      if (value != null) {
+         if ("false".equals(value)) {
+            retVal = false;
+         } else if ("true".equals(value)) {
+            retVal = true;
+         }
+      }
+
+      return retVal;
+   }
+
+   public static int getInt(String key, int defaultVal) {
+      return getInstance().getIntImpl(key, defaultVal);
+   }
+
+   private int getIntImpl(String key, int defaultVal) {
+      String value = this.getImpl(key);
+      int retVal = defaultVal;
+
+      try {
+         retVal = Integer.parseInt(value);
+      } catch (NumberFormatException var6) {
+      }
+
+      return retVal;
+   }
+
+   public static void addPropertyChangeListener(String key, PropertyChangeListener pcl) {
+      getInstance().addPropertyChangeListenerImpl(key, pcl);
+   }
+
+   private void addPropertyChangeListenerImpl(String key, PropertyChangeListener pcl) {
+      this.checkKeyArg(key);
+      this.pcs.addPropertyChangeListener(key, pcl);
+   }
+
+   public static void removePropertyChangeListener(PropertyChangeListener pcl) {
+      getInstance().removePropertyChangeListenerImpl(pcl);
+   }
+
+   private void removePropertyChangeListenerImpl(PropertyChangeListener pcl) {
+      this.pcs.removePropertyChangeListener(pcl);
+   }
+
+   private void checkKeyArg(String key) {
+      if (null == key || "".equals(key)) {
+         throw new IllegalArgumentException("null key not allowed");
+      }
+   }
+
+   private Settings() {
+   }
+
+   static {
+      try {
+         Class var0 = Class.forName("com.sun.scenario.animation.MasterTimer");
+      } catch (ClassNotFoundException var1) {
+         var1.printStackTrace();
+      }
+
+      SETTINGS_KEY = new StringBuilder("SettingsKey");
+   }
 }

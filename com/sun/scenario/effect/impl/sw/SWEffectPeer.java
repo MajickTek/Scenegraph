@@ -1,48 +1,65 @@
-/*
- * Copyright 2008 Sun Microsystems, Inc.  All Rights Reserved.
- * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
- *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
- *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
- *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
- */
-
 package com.sun.scenario.effect.impl.sw;
 
-import com.sun.scenario.effect.Effect.AccelType;
+import com.sun.scenario.effect.Effect;
 import com.sun.scenario.effect.impl.EffectPeer;
 import java.awt.GraphicsConfiguration;
 import java.awt.image.BufferedImage;
 
-/**
- * @author Chris Campbell
- */
 public abstract class SWEffectPeer extends EffectPeer {
+   protected SWEffectPeer(GraphicsConfiguration gc) {
+      super(gc);
+   }
 
-    protected SWEffectPeer(GraphicsConfiguration gc) {
-        super(gc);
-    }
-    
-    protected BufferedImage getDestImageFromPool(int w, int h) {
-        return (BufferedImage)getRenderer().getCompatibleImage(w, h);
-    }
+   protected BufferedImage getDestImageFromPool(int w, int h) {
+      return (BufferedImage)this.getRenderer().getCompatibleImage(w, h);
+   }
 
-    @Override
-    public AccelType getAccelType() {
-        return AccelType.NONE;
-    }
+   public Effect.AccelType getAccelType() {
+      return Effect.AccelType.NONE;
+   }
+
+   protected final void accum(int pixel, float mul, float[] fvals) {
+      mul /= 255.0F;
+      fvals[0] += (float)(pixel >> 16 & 255) * mul;
+      fvals[1] += (float)(pixel >> 8 & 255) * mul;
+      fvals[2] += (float)(pixel & 255) * mul;
+      fvals[3] += (float)(pixel >>> 24) * mul;
+   }
+
+   protected final void lsample(int[] img, float floc_x, float floc_y, int w, int h, int scan, float[] fvals) {
+      fvals[0] = 0.0F;
+      fvals[1] = 0.0F;
+      fvals[2] = 0.0F;
+      fvals[3] = 0.0F;
+      if (floc_x >= 0.0F && floc_y >= 0.0F && floc_x < 1.0F && floc_y < 1.0F) {
+         floc_x = floc_x * (float)w + 0.5F;
+         floc_y = floc_y * (float)h + 0.5F;
+         int iloc_x = (int)floc_x;
+         int iloc_y = (int)floc_y;
+         floc_x -= (float)iloc_x;
+         floc_y -= (float)iloc_y;
+         int offset = iloc_y * scan + iloc_x;
+         float fract = floc_x * floc_y;
+         if (iloc_y < h) {
+            if (iloc_x < w) {
+               this.accum(img[offset], fract, fvals);
+            }
+
+            if (iloc_x > 0) {
+               this.accum(img[offset - 1], floc_y - fract, fvals);
+            }
+         }
+
+         if (iloc_y > 0) {
+            if (iloc_x < w) {
+               this.accum(img[offset - scan], floc_x - fract, fvals);
+            }
+
+            if (iloc_x > 0) {
+               this.accum(img[offset - scan - 1], 1.0F - floc_x - floc_y + fract, fvals);
+            }
+         }
+      }
+
+   }
 }

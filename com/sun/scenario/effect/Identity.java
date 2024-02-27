@@ -1,135 +1,95 @@
-/*
- * Copyright 2008 Sun Microsystems, Inc.  All Rights Reserved.
- * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
- *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.
- *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
- * accompanied this code).
- *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
- *
- * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
- * CA 95054 USA or visit www.sun.com if you need additional information or
- * have any questions.
- */
-
 package com.sun.scenario.effect;
 
+import com.sun.scenario.effect.impl.ImageData;
+import java.awt.AlphaComposite;
+import java.awt.Graphics2D;
 import java.awt.GraphicsConfiguration;
 import java.awt.Image;
 import java.awt.Rectangle;
+import java.awt.geom.AffineTransform;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
+import java.awt.image.BufferedImage;
+import java.awt.image.ImageObserver;
+import java.util.HashMap;
+import java.util.Map;
 
-/**
- * A type of source effect that simply returns the specified {@code Image}.
- * No other processing is performed on the specified {@code Image}.
- * 
- * @author Chris Campbell
- */
 public class Identity extends Effect {
+   private BufferedImage src;
+   private Point2D.Float loc = new Point2D.Float();
+   private final Map<GraphicsConfiguration, ImageData> datacache = new HashMap();
 
-    private Image src;
-    private Point2D.Float loc = new Point2D.Float();
-    
-    /**
-     * Constructs a new {@code Identity} effect with the given {@code Image}.
-     *
-     * @param src the source image, or null
-     */
-    public Identity(Image src) {
-        this.src = src;
-    }
-    
-    /**
-     * Returns the source image (can be null).
-     * 
-     * @return the source image
-     */
-    public final Image getSource() {
-        return src;
-    }
+   public Identity(BufferedImage src) {
+      this.src = src;
+   }
 
-    /**
-     * Sets the source image.
-     * 
-     * @param src the source image, or null
-     */
-    public void setSource(Image src) {
-        this.src = src;
-    }
-    
-    /**
-     * Returns the location of the source image, relative to the untransformed
-     * source content bounds.
-     * 
-     * @return the location of the source image
-     */
-    public final Point2D getLocation() {
-        return loc;
-    }
-    
-    /**
-     * Sets the location of the source image, relative to the untransformed
-     * source content bounds.
-     * 
-     * @param pt the new location of the source image
-     * @throws IllegalArgumentException if {@code pt} is null
-     */
-    public void setLocation(Point2D pt) {
-        if (pt == null) {
-            throw new IllegalArgumentException("Location must be non-null");
-        }
-        this.loc.setLocation(pt);
-    }
+   public final BufferedImage getSource() {
+      return this.src;
+   }
 
-    @Override
-    public boolean isInDeviceSpace() {
-        return false;
-    }
+   public void setSource(BufferedImage src) {
+      BufferedImage old = this.src;
+      this.src = src;
+      this.clearCache();
+      this.firePropertyChange("source", old, src);
+   }
 
-    @Override
-    public int needsSourceContent() {
-        return NONE;
-    }
+   public final Point2D getLocation() {
+      return this.loc;
+   }
 
-    @Override
-    public Rectangle2D getBounds() {
-        if (src == null) {
-            // just an empty rectangle
-            return new Rectangle();
-        } else {
-            float srcx = loc.x;
-            float srcy = loc.y;
-            Rectangle2D r = getSourceContent().getUntransformedBounds();
-            if (r != null) {
-                srcx += r.getX();
-                srcy += r.getY();
-            }
-            return new Rectangle2D.Float(srcx, srcy, src.getWidth(null), src.getHeight(null));
-        }
-    }
+   public void setLocation(Point2D pt) {
+      if (pt == null) {
+         throw new IllegalArgumentException("Location must be non-null");
+      } else {
+         Point2D old = this.loc;
+         this.loc.setLocation(pt);
+         this.firePropertyChange("location", old, pt);
+      }
+   }
 
-    @Override
-    public Image filter(GraphicsConfiguration config) {
-        // TODO: the peer code currently assumes that the image returned
-        // here is in the expected format (e.g. a VolatileImage in the case
-        // of hardware peers); perhaps we should convert the source image
-        // here if it's not already compatible with the given config...
-        return src;
-    }
-    
-    @Override
-    public AccelType getAccelType(GraphicsConfiguration config) {
-        // TODO: perhaps we should look at the image type here...
-        return AccelType.NONE;
-    }
+   public Rectangle2D getBounds(AffineTransform transform, Effect defaultInput) {
+      if (this.src == null) {
+         return new Rectangle();
+      } else {
+         Rectangle2D r = new Rectangle2D.Float(this.loc.x, this.loc.y, (float)this.src.getWidth(), (float)this.src.getHeight());
+         if (transform != null && !transform.isIdentity()) {
+            r = this.transformBounds(transform, (Rectangle2D)r);
+         }
+
+         return (Rectangle2D)r;
+      }
+   }
+
+   public ImageData filter(GraphicsConfiguration config, AffineTransform transform, Effect defaultInput) {
+      if (this.src == null) {
+         return null;
+      } else {
+         ImageData id = (ImageData)this.datacache.get(config);
+         if (id == null) {
+            int w = this.src.getWidth();
+            int h = this.src.getHeight();
+            Image img = Effect.createCompatibleImage(config, w, h);
+            Graphics2D g2 = (Graphics2D)img.getGraphics();
+            g2.setComposite(AlphaComposite.Src);
+            g2.drawImage(this.src, 0, 0, (ImageObserver)null);
+            g2.dispose();
+            id = new ImageData(config, img, new Rectangle(w, h));
+            this.datacache.put(config, id);
+         }
+
+         id.addref();
+         transform = Offset.getOffsetTransform(transform, (double)this.loc.x, (double)this.loc.y);
+         id = this.ensureTransform(config, id, transform);
+         return id;
+      }
+   }
+
+   public Effect.AccelType getAccelType(GraphicsConfiguration config) {
+      return Effect.AccelType.INTRINSIC;
+   }
+
+   private void clearCache() {
+      this.datacache.clear();
+   }
 }
