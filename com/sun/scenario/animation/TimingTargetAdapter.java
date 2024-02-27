@@ -1,0 +1,64 @@
+/*
+ * Copyright 2007 Sun Microsystems, Inc.  All Rights Reserved.
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+ *
+ * This code is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 2 only, as
+ * published by the Free Software Foundation.
+ *
+ * This code is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * version 2 for more details (a copy is included in the LICENSE file that
+ * accompanied this code).
+ *
+ * You should have received a copy of the GNU General Public License version
+ * 2 along with this work; if not, write to the Free Software Foundation,
+ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ *
+ * Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa Clara,
+ * CA 95054 USA or visit www.sun.com if you need additional information or
+ * have any questions.
+ */
+
+package com.sun.scenario.animation;
+
+/**
+ * Implements the {@link TimingTarget} interface, providing stubs for all
+ * TimingTarget methods.  Subclasses may extend this adapter rather than
+ * implementing the TimingTarget interface if they only care about a 
+ * subset of the events that TimingTarget provides.  For example, 
+ * sequencing animations may only require monitoring the 
+ * {@link TimingTarget#end} method, so subclasses of this adapter
+ * may ignore the other methods such as timingEvent.
+ *
+ * @author Chet
+ */
+public class TimingTargetAdapter implements TimingTarget {
+
+    /**
+     * This method will receive all of the timing events from an Clip
+     * during an animation.  The fraction is the percent elapsed (0 to 1)
+     * of the current animation cycle.
+     * @param fraction the fraction of completion between the start and
+     * end of the current cycle.  Note that on reversing cycles
+     * ({@link Clip.Direction#BACKWARD}) the fraction decreases
+     * from 1.0 to 0 on backwards-running cycles.  Note also that animations
+     * with a duration of {@link Clip#INDEFINITE INDEFINITE} will call
+     * timingEvent with an undefined value for fraction, since there is
+     * no fraction that makes sense if the animation has no defined length.
+     * @see Clip.Direction
+     */
+    public void timingEvent(float fraction) {}
+
+    /**
+     * Called when the Clip's animation begins.  This provides a chance
+     * for targets to perform any setup required at animation start time.
+     */
+    public void begin() {}
+    
+    /**
+     * Called when the Clip's animation ends
+     */
+    public void end() {}
+}
